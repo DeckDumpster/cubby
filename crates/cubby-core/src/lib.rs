@@ -1,6 +1,7 @@
 //! Pure domain logic: no I/O. Budget math, policy resolution and the ranker land here.
 
 pub mod budget;
+pub mod policy_url;
 pub mod rank;
 
 /// Whole seconds in `minutes`.

@@ -4,6 +4,7 @@
 pub mod access;
 mod error;
 mod identity;
+mod parent;
 pub mod play;
 mod ratelimit;
 

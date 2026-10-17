@@ -14,6 +14,8 @@ pub enum DbError {
     Taken(String),
     /// The id is not a registry-minted family id.
     BadId(String),
+    /// The caller asked for something that makes no sense (an unknown action, a missing link).
+    Invalid(String),
 }
 
 pub type Result<T> = std::result::Result<T, DbError>;
@@ -33,6 +35,7 @@ impl fmt::Display for DbError {
             ),
             DbError::Taken(e) => write!(f, "email {e:?} is already registered"),
             DbError::BadId(i) => write!(f, "{i:?} is not a family id"),
+            DbError::Invalid(m) => write!(f, "{m}"),
         }
     }
 }

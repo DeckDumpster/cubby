@@ -183,6 +183,11 @@ pub fn parse_windows(pairs: &[(String, String)]) -> Option<Vec<(u32, u32)>> {
         .collect()
 }
 
+/// Whether `tz` names a time zone this build knows.
+pub fn valid_tz(tz: &str) -> bool {
+    jiff::tz::TimeZone::get(tz).is_ok()
+}
+
 pub fn timed_out(last_beat_at: i64, now: i64) -> bool {
     now - last_beat_at > BEAT_TIMEOUT_S
 }
