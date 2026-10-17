@@ -1,0 +1,341 @@
+{
+  "title": "Cubby",
+  "uid": "cubby",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "tags": [
+    "cubby"
+  ],
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "victoriametrics-metrics-datasource",
+        "label": "Data source"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Plays by outcome",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome, reason) (count_over_time(cubby_plays[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Plays by child",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum by (child) (count_over_time(cubby_plays[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Watched seconds by child",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (child) (sum_over_time(cubby_watch_seconds[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Budget charged by child (video equivalents)",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (child) (sum_over_time(cubby_charge[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Requests by kind and resolution",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum by (kind, resolution) (count_over_time(cubby_requests[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "YouTube quota units spent (daily cap 10,000)",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(sum_over_time(cubby_yt_quota_units[1d]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "id": 7,
+      "title": "YouTube quota units by call",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "sum by (call) (sum_over_time(cubby_yt_quota_units[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Worker run seconds by outcome",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "max by (outcome) (max_over_time(cubby_worker_run_seconds[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "id": 9,
+      "title": "Device auth by outcome",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (count_over_time(cubby_device_auth[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "HTTP request seconds p95 by route",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "expr": "quantile_over_time(0.95, cubby_http_request_seconds[$__interval])",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "id": 11,
+      "title": "HTTP requests by status",
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (count_over_time(cubby_http_request_seconds[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

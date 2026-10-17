@@ -23,3 +23,4 @@ cubby-yt = { path = "../cubby-yt" }
 [dev-dependencies]
 tower.workspace = true
 http-body-util.workspace = true
+cubby-otel = { path = "../cubby-otel", features = ["testing"] }
