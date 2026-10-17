@@ -61,6 +61,17 @@ impl MetricsSink {
         let _ = post(addr, &body, self.deadline);
     }
 
+    /// Pushes one sample of metric `name` in `unit` carrying `labels`; failures are swallowed.
+    pub fn push_value(&self, name: &str, value: f64, unit: &str, labels: &[(&str, &str)]) {
+        let Some(addr) = &self.endpoint else {
+            return;
+        };
+        let body = self
+            .encode_unit(name, value, unit, labels, SystemTime::now())
+            .encode_to_vec();
+        let _ = post(addr, &body, self.deadline);
+    }
+
     pub fn try_push_seconds(
         &self,
         name: &str,

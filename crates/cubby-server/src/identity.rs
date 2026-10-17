@@ -30,6 +30,7 @@ pub(crate) fn routes(state: Arc<AppState>) -> Router {
         .route_layer(middleware::from_fn_with_state(state.clone(), parent_guard));
     let child = Router::new()
         .route("/api/child/me", get(me))
+        .merge(crate::play::routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), device_guard));
     Router::new()
         .route("/api/child/pair", post(pair))
@@ -50,7 +51,7 @@ fn db<T, E: std::fmt::Display>(r: std::result::Result<T, E>) -> Result<T> {
 
 /// The family a verified parent belongs to, put on the request by [`parent_guard`].
 #[derive(Clone)]
-struct ParentOf(String);
+pub(crate) struct ParentOf(pub(crate) String);
 
 impl AppState {
     /// Opens `family_id`'s database, but only if the registry knows the family: a made-up id
@@ -126,7 +127,7 @@ async fn device_guard(
     Ok(next.run(req).await)
 }
 
-fn open_own(state: &AppState, family_id: &str) -> Result<Connection> {
+pub(crate) fn open_own(state: &AppState, family_id: &str) -> Result<Connection> {
     state
         .open_known_family(family_id)?
         .ok_or_else(|| ApiError::unauthorized("unknown family"))

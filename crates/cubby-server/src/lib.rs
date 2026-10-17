@@ -4,6 +4,7 @@
 pub mod access;
 mod error;
 mod identity;
+pub mod play;
 mod ratelimit;
 
 use std::path::PathBuf;
