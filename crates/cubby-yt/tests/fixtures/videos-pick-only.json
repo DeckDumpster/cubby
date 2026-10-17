@@ -1,0 +1,38 @@
+{
+ "endpoint": "videos",
+ "params": {
+  "part": "snippet,contentDetails,status",
+  "id": "pick"
+ },
+ "response": {
+  "items": [
+   {
+    "id": "pick",
+    "snippet": {
+     "title": "Picked",
+     "channelId": "UCchan",
+     "channelTitle": "Chan",
+     "tags": [
+      "t1",
+      "t2"
+     ],
+     "thumbnails": {
+      "default": {
+       "url": "https://i.ytimg.com/vi/pick/default.jpg"
+      },
+      "medium": {
+       "url": "https://i.ytimg.com/vi/pick/mqdefault.jpg"
+      }
+     }
+    },
+    "contentDetails": {
+     "duration": "PT4M13S"
+    },
+    "status": {
+     "privacyStatus": "public",
+     "madeForKids": true
+    }
+   }
+  ]
+ }
+}

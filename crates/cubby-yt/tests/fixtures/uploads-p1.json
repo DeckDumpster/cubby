@@ -1,0 +1,23 @@
+{
+ "endpoint": "playlistItems",
+ "params": {
+  "part": "contentDetails",
+  "playlistId": "UUchan",
+  "maxResults": "50"
+ },
+ "response": {
+  "items": [
+   {
+    "contentDetails": {
+     "videoId": "v1"
+    }
+   },
+   {
+    "contentDetails": {
+     "videoId": "v2"
+    }
+   }
+  ],
+  "nextPageToken": "T2"
+ }
+}

@@ -1,0 +1,19 @@
+{
+ "endpoint": "channels",
+ "params": {
+  "part": "contentDetails",
+  "id": "UCchan"
+ },
+ "response": {
+  "items": [
+   {
+    "id": "UCchan",
+    "contentDetails": {
+     "relatedPlaylists": {
+      "uploads": "UUchan"
+     }
+    }
+   }
+  ]
+ }
+}

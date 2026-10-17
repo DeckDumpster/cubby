@@ -1,0 +1,146 @@
+{
+ "endpoint": "videos",
+ "params": {
+  "part": "snippet,contentDetails,status",
+  "id": "v1,v2,v3,v4,v5"
+ },
+ "response": {
+  "items": [
+   {
+    "id": "v1",
+    "snippet": {
+     "title": "One",
+     "channelId": "UCchan",
+     "channelTitle": "Chan",
+     "tags": [
+      "t1",
+      "t2"
+     ],
+     "thumbnails": {
+      "default": {
+       "url": "https://i.ytimg.com/vi/v1/default.jpg"
+      },
+      "medium": {
+       "url": "https://i.ytimg.com/vi/v1/mqdefault.jpg"
+      }
+     }
+    },
+    "contentDetails": {
+     "duration": "PT4M13S"
+    },
+    "status": {
+     "privacyStatus": "public",
+     "madeForKids": true
+    }
+   },
+   {
+    "id": "v2",
+    "snippet": {
+     "title": "Two",
+     "channelId": "UCchan",
+     "channelTitle": "Chan",
+     "tags": [
+      "t1",
+      "t2"
+     ],
+     "thumbnails": {
+      "default": {
+       "url": "https://i.ytimg.com/vi/v2/default.jpg"
+      },
+      "medium": {
+       "url": "https://i.ytimg.com/vi/v2/mqdefault.jpg"
+      }
+     }
+    },
+    "contentDetails": {
+     "duration": "PT1H2M3S"
+    },
+    "status": {
+     "privacyStatus": "public",
+     "madeForKids": true
+    }
+   },
+   {
+    "id": "v3",
+    "snippet": {
+     "title": "Three",
+     "channelId": "UCchan",
+     "channelTitle": "Chan",
+     "tags": [
+      "t1",
+      "t2"
+     ],
+     "thumbnails": {
+      "default": {
+       "url": "https://i.ytimg.com/vi/v3/default.jpg"
+      },
+      "medium": {
+       "url": "https://i.ytimg.com/vi/v3/mqdefault.jpg"
+      }
+     }
+    },
+    "contentDetails": {
+     "duration": "PT4M13S"
+    },
+    "status": {
+     "privacyStatus": "public",
+     "madeForKids": true
+    }
+   },
+   {
+    "id": "v4",
+    "snippet": {
+     "title": "Four",
+     "channelId": "UCchan",
+     "channelTitle": "Chan",
+     "tags": [
+      "t1",
+      "t2"
+     ],
+     "thumbnails": {
+      "default": {
+       "url": "https://i.ytimg.com/vi/v4/default.jpg"
+      },
+      "medium": {
+       "url": "https://i.ytimg.com/vi/v4/mqdefault.jpg"
+      }
+     }
+    },
+    "contentDetails": {
+     "duration": "PT4M13S"
+    },
+    "status": {
+     "privacyStatus": "private",
+     "madeForKids": true
+    }
+   },
+   {
+    "id": "v5",
+    "snippet": {
+     "title": "Five",
+     "channelId": "UCchan",
+     "channelTitle": "Chan",
+     "tags": [
+      "t1",
+      "t2"
+     ],
+     "thumbnails": {
+      "default": {
+       "url": "https://i.ytimg.com/vi/v5/default.jpg"
+      },
+      "medium": {
+       "url": "https://i.ytimg.com/vi/v5/mqdefault.jpg"
+      }
+     }
+    },
+    "contentDetails": {
+     "duration": "PT4M13S"
+    },
+    "status": {
+     "privacyStatus": "public",
+     "madeForKids": true
+    }
+   }
+  ]
+ }
+}

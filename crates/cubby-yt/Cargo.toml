@@ -6,7 +6,5 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-cubby-otel = { path = "../cubby-otel" }
-
-[dev-dependencies]
-cubby-otel = { path = "../cubby-otel", features = ["testing"] }
+serde_json.workspace = true
+ureq.workspace = true
