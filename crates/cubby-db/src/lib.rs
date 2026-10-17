@@ -10,6 +10,8 @@ pub use family::{FAMILY_VERSION, open_family};
 pub use registry::{Family, Registry};
 pub mod identity;
 
+pub mod browse;
+
 /// Name of the per-family database file for family `id`.
 pub fn family_file_name(id: &str) -> String {
     format!("family-{id}.sqlite")
