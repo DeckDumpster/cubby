@@ -17,6 +17,9 @@ use opentelemetry_proto::tonic::metrics::v1::{
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use prost::Message;
 
+#[cfg(any(test, feature = "testing"))]
+pub mod fake;
+
 pub const PATH: &str = "/opentelemetry/v1/metrics";
 
 pub struct MetricsSink {
@@ -70,6 +73,24 @@ impl MetricsSink {
             .encode_unit(name, value, unit, labels, SystemTime::now())
             .encode_to_vec();
         let _ = post(addr, &body, self.deadline);
+    }
+
+    /// `cubby_requests{kind,resolution}`: a child's ask and how it was resolved.
+    pub fn push_request(&self, kind: &str, resolution: &str) {
+        self.push_count(
+            "cubby_requests",
+            &[("kind", kind), ("resolution", resolution)],
+        );
+    }
+
+    /// `cubby_yt_quota_units{call}`: YouTube Data API quota spent by one call.
+    pub fn push_yt_quota(&self, call: &str, units: u32) {
+        self.push_value(
+            "cubby_yt_quota_units",
+            f64::from(units),
+            "1",
+            &[("call", call)],
+        );
     }
 
     pub fn try_push_seconds(
@@ -286,5 +307,60 @@ mod tests {
         let s = MetricsSink::new(Some(&addr), "cubby-worker");
         assert!(s.try_push_seconds("cubby_x", 1.0, &[]).is_err());
         s.push_seconds("cubby_x", 1.0, &[]);
+    }
+}
+
+#[cfg(test)]
+mod metric_tests {
+    use super::fake::FakeSink;
+    use super::*;
+
+    #[test]
+    fn a_request_pushes_cubby_requests_with_kind_and_resolution() {
+        let f = FakeSink::start();
+        MetricsSink::new(Some(&f.addr), "cubby-server").push_request("video", "approved");
+        let got = f.wait_for("cubby_requests");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].label("kind"), Some("video"));
+        assert_eq!(got[0].label("resolution"), Some("approved"));
+    }
+
+    #[test]
+    fn a_quota_charge_pushes_the_units_by_call() {
+        let f = FakeSink::start();
+        MetricsSink::new(Some(&f.addr), "cubby-worker").push_yt_quota("videos.list", 3);
+        let got = f.wait_for("cubby_yt_quota_units");
+        assert_eq!(
+            (got[0].value, got[0].label("call")),
+            (3.0, Some("videos.list"))
+        );
+    }
+}
+
+#[cfg(test)]
+mod dashboard_tests {
+    /// The metrics the LLD's Telemetry section names; the dashboard must chart each.
+    const METRICS: [&str; 8] = [
+        "cubby_plays",
+        "cubby_watch_seconds",
+        "cubby_charge",
+        "cubby_requests",
+        "cubby_yt_quota_units",
+        "cubby_worker_run_seconds",
+        "cubby_device_auth",
+        "cubby_http_request_seconds",
+    ];
+
+    #[test]
+    fn the_grafana_dashboard_charts_every_metric() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/grafana/cubby.json"
+        );
+        let text = std::fs::read_to_string(path).unwrap();
+        for m in METRICS {
+            assert!(text.contains(m), "dashboard lacks {m}");
+        }
+        assert!(text.trim_start().starts_with('{') && text.contains("\"panels\""));
     }
 }

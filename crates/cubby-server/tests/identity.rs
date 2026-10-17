@@ -541,3 +541,58 @@ async fn a_paired_device_plays_beats_and_ends_over_http() {
         (StatusCode::OK, Some("not-allowed"))
     );
 }
+
+#[tokio::test]
+async fn play_beat_and_http_telemetry_reach_the_otlp_sink() {
+    let f = cubby_otel::fake::FakeSink::start();
+    let e = env_with(true, &f.addr).await;
+    seed(&e);
+    let conn = e.family();
+    conn.execute_batch(
+        "INSERT INTO videos(youtube_id,title,duration_s) VALUES ('v1','one',600);
+         INSERT INTO allow_policies(id,kind,youtube_id,added_at) VALUES ('p','video','v1',0);
+         INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES ('v1',NULL,'p','approved',0);",
+    )
+    .unwrap();
+    let code = ident::new_pairing_code(&conn, "c1", now())
+        .unwrap()
+        .unwrap();
+    let token = ident::redeem_pairing_code(&conn, &e.family_id, &code.code, None, now())
+        .unwrap()
+        .token;
+
+    let (_, v) = child_post(&e, "/api/child/play", &token, json!({"youtube_id": "v1"})).await;
+    let id = v["grant_id"].as_str().unwrap().to_string();
+    let plays = f.wait_for("cubby_plays");
+    assert_eq!(plays[0].label("outcome"), Some("granted"));
+    assert_eq!(plays[0].label("child"), Some("c1"));
+
+    let (_, v) = child_post(&e, "/api/child/play", &token, json!({"youtube_id": "nope"})).await;
+    assert_eq!(v["refused"], "not-allowed");
+    let refused = loop {
+        let r: Vec<_> = f
+            .wait_for("cubby_plays")
+            .into_iter()
+            .filter(|s| s.label("outcome") == Some("refused"))
+            .collect();
+        if !r.is_empty() {
+            break r;
+        }
+    };
+    assert_eq!(refused[0].label("reason"), Some("not-allowed"));
+
+    // Move the grant's last beat back so the next beat measures 60 watched seconds.
+    conn.execute(
+        "UPDATE play_grants SET last_beat_at = last_beat_at - 60",
+        [],
+    )
+    .unwrap();
+    let beat = format!("/api/child/grant/{id}/beat");
+    child_post(&e, &beat, &token, json!({"position_s": 60})).await;
+    let watch = f.wait_for("cubby_watch_seconds");
+    assert!(watch[0].value > 0.0 && watch[0].label("child") == Some("c1"));
+    let charge = f.wait_for("cubby_charge");
+    assert!(charge[0].value > 0.0 && charge[0].label("child") == Some("c1"));
+
+    assert!(!f.wait_for("cubby_http_request_seconds").is_empty());
+}

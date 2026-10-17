@@ -35,4 +35,12 @@ mod tests {
     fn a_pass_with_no_endpoint_still_succeeds() {
         assert_eq!(run_once(""), "ok");
     }
+
+    #[test]
+    fn a_pass_pushes_run_seconds_with_its_outcome() {
+        let f = cubby_otel::fake::FakeSink::start();
+        run_once(&f.addr);
+        let got = f.wait_for("cubby_worker_run_seconds");
+        assert_eq!(got[0].label("outcome"), Some("ok"));
+    }
 }
