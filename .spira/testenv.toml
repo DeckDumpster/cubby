@@ -1,0 +1,10 @@
+# Declares deploy/ci.sh to testenv, so `testenv --suites ci <branch> cubby` runs the gate.
+# The image is the rust toolchain the workspace pins; ci.sh fetches node itself when absent.
+image = "docker.io/library/rust:1.94-bookworm"
+workdir = "/work"
+timeout = 1800
+default = ["ci"]
+
+[tier.ci]
+argv = ["bash", "deploy/ci.sh"]
+timeout = 1800

@@ -1,0 +1,8 @@
+[Unit]
+Description=Cubby metadata worker (one pass)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/podman run --rm --env-file=%h/.config/cubby/worker.env -v cubby-data:/data:Z localhost/cubby:latest cubby-worker

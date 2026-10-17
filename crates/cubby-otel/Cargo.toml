@@ -1,0 +1,10 @@
+[package]
+name = "cubby-otel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+opentelemetry-proto.workspace = true
+prost.workspace = true
