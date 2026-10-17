@@ -8,3 +8,6 @@ default = ["ci"]
 [tier.ci]
 argv = ["bash", "deploy/ci.sh"]
 timeout = 1800
+
+[ui]
+dir = "web"
