@@ -27,6 +27,7 @@ pub(crate) fn routes(state: Arc<AppState>) -> Router {
     let parent = Router::new()
         .route("/api/parent/children/{id}/pairing", post(new_pairing))
         .route("/api/parent/devices/{id}/revoke", post(revoke))
+        .merge(crate::parent::routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), parent_guard));
     let child = Router::new()
         .route("/api/child/me", get(me))
