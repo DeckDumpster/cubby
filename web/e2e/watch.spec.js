@@ -1,0 +1,165 @@
+import { test, expect } from '@playwright/test';
+
+const tile = (id, title) => ({ youtube_id: id, title, channel_title: 'Chan', thumb: `/thumbs/${id}.jpg` });
+const HOME = {
+	child: { name: 'Kid' },
+	remaining: { videos: 3, minutes: null },
+	total_videos: 5,
+	sections: [{ key: 'all', title: 'All videos', items: [tile('v1', 'First video'), tile('v2', 'Second video')] }]
+};
+const NEXT = { items: [tile('v2', 'Second video'), tile('v3', 'Third video')], remaining: { videos: 2, minutes: null } };
+
+/** A stand-in for the YouTube IFrame API; the test drives its state by hand. */
+const FAKE_PLAYER = () => {
+	window.__players = [];
+	window.YT = {
+		PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2 },
+		Player: class {
+			constructor(el, opts) {
+				this.opts = opts;
+				this.el = el;
+				this.destroyed = false;
+				el.innerHTML = '<iframe title="fake player"></iframe>';
+				window.__players.push(this);
+			}
+			getCurrentTime() {
+				return 12;
+			}
+			destroy() {
+				this.destroyed = true;
+				this.el.innerHTML = '';
+			}
+		}
+	};
+	window.__state = (s) => window.__players.at(-1).opts.events.onStateChange({ data: s });
+};
+
+async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } } } = {}) {
+	const calls = [];
+	await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
+	await page.addInitScript(FAKE_PLAYER);
+	await page.route('**/api/child/**', async (route) => {
+		const req = route.request();
+		const path = new URL(req.url()).pathname;
+		calls.push({ path, body: req.postDataJSON?.() ?? null });
+		const json = (data) => route.fulfill({ json: data });
+		if (path.endsWith('/home')) return json(HOME);
+		if (path.endsWith('/play')) return json(play);
+		if (path.endsWith('/beat')) return json({ remaining: { videos: 2, minutes: null }, stop: false });
+		if (path.endsWith('/end')) return json({ ok: true });
+		if (path.endsWith('/next')) return json(NEXT);
+		if (path.endsWith('/search')) return json({ items: [tile('v9', 'Found it')] });
+		if (path.endsWith('/request')) return json({ ok: true });
+		return route.fulfill({ status: 404, json: {} });
+	});
+	return calls;
+}
+
+const offOrigin = (page) =>
+	page.evaluate(() =>
+		[...document.querySelectorAll('a[href], area[href], form[action]')]
+			.map((e) => e.getAttribute('href') ?? e.getAttribute('action'))
+			.filter((u) => new URL(u, location.href).origin !== location.origin)
+	);
+
+test('the grid shows the budget badge and has no off-origin link anywhere in the flow', async ({ page }) => {
+	await setup(page);
+	await page.goto('/watch');
+	await expect(page.getByTestId('badge')).toContainText('3 videos left today');
+	await expect(page.getByRole('button', { name: /First video/ })).toBeVisible();
+	expect(await offOrigin(page)).toEqual([]);
+
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	expect(await offOrigin(page)).toEqual([]);
+
+	await page.evaluate(() => window.__state(0));
+	await expect(page.getByTestId('end-card')).toBeVisible();
+	expect(await offOrigin(page)).toEqual([]);
+});
+
+test('the player is built only after a grant, with the privacy host and the LLD options', async ({ page }) => {
+	await setup(page);
+	await page.goto('/watch');
+	expect(await page.evaluate(() => window.__players.length)).toBe(0);
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	const opts = await page.evaluate(() => {
+		const o = window.__players[0].opts;
+		return { host: o.host, videoId: o.videoId, vars: o.playerVars };
+	});
+	expect(opts.host).toBe('https://www.youtube-nocookie.com');
+	expect(opts.videoId).toBe('v1');
+	expect(opts.vars).toMatchObject({ autoplay: 0, rel: 0, playsinline: 1, fs: 1, iv_load_policy: 3 });
+});
+
+test('ENDED destroys the player and shows the end card with suggestions and the remaining budget', async ({ page }) => {
+	const calls = await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	await page.evaluate(() => window.__state(1));
+	await page.evaluate(() => window.__state(0));
+	const card = page.getByTestId('end-card');
+	await expect(card).toBeVisible();
+	await expect(page.getByTestId('end-budget')).toHaveText('2 videos left today');
+	await expect(card.getByRole('button', { name: /Third video/ })).toBeVisible();
+	expect(await page.evaluate(() => window.__players[0].destroyed)).toBe(true);
+	expect(calls.find((c) => c.path.endsWith('/end')).body).toEqual({ reason: 'ended' });
+	expect(calls.some((c) => c.path.endsWith('/next'))).toBe(true);
+});
+
+test('a spent budget shows the refusal card and never builds a player', async ({ page }) => {
+	await setup(page, { play: { refused: 'out-of-videos', next_start: null } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.getByTestId('refusal')).toContainText('all your videos for today');
+	expect(await page.evaluate(() => window.__players.length)).toBe(0);
+});
+
+test('like and more-from-channel post requests', async ({ page }) => {
+	const calls = await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await page.getByRole('button', { name: /I like this/ }).click();
+	await page.getByRole('button', { name: /More from this channel/ }).click();
+	const reqs = calls.filter((c) => c.path.endsWith('/request')).map((c) => c.body);
+	expect(reqs).toEqual([
+		{ kind: 'like', youtube_id: 'v1' },
+		{ kind: 'more-from-channel', youtube_id: 'v1' }
+	]);
+});
+
+test('search shows only what the search API returns', async ({ page }) => {
+	await setup(page);
+	await page.goto('/watch');
+	await page.getByLabel('search').fill('cats');
+	await page.getByRole('button', { name: 'Search' }).click();
+	await expect(page.getByRole('button', { name: /Found it/ })).toBeVisible();
+	await expect(page.getByRole('button', { name: /First video/ })).toHaveCount(0);
+});
+
+test('no pause card in a plain browser', async ({ page }) => {
+	await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	await page.evaluate(() => window.__state(1));
+	await page.evaluate(() => window.__state(2));
+	await expect(page.getByTestId('pause-card')).toHaveCount(0);
+});
+
+test.describe('inside the iPad shell', () => {
+	test.use({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0) CubbyShell/1.0' });
+	test('PAUSED shows the pause card over the player', async ({ page }) => {
+		await setup(page);
+		await page.goto('/watch');
+		await page.getByRole('button', { name: /First video/ }).click();
+		await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+		await page.evaluate(() => window.__state(1));
+		await page.evaluate(() => window.__state(2));
+		await expect(page.getByTestId('pause-card')).toBeVisible();
+		await page.getByRole('button', { name: 'Keep watching' }).click();
+		await expect(page.getByTestId('pause-card')).toHaveCount(0);
+	});
+});
