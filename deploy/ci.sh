@@ -20,6 +20,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 echo "==> cargo test"
 cargo test --workspace
 
+echo "==> deploy artefacts"
+bash deploy/test-deploy.sh
+
 cd web
 echo "==> npm ci"
 npm ci
