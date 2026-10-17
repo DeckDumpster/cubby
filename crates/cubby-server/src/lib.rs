@@ -7,6 +7,8 @@ mod identity;
 pub mod play;
 mod ratelimit;
 
+pub mod child;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
