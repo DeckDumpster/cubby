@@ -9,6 +9,17 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    if let Err(e) = cubby_server::check_access(&config).await {
+        eprintln!("cubby-server: {e}");
+        std::process::exit(1);
+    }
+    let router = match app(&config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("cubby-server: {e}");
+            std::process::exit(2);
+        }
+    };
     let addr = format!("{}:{}", config.bind, config.port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -21,9 +32,12 @@ async fn main() {
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
-    if let Err(e) = axum::serve(listener, app(&config))
-        .with_graceful_shutdown(shutdown)
-        .await
+    if let Err(e) = axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
     {
         eprintln!("cubby-server: {e}");
         std::process::exit(1);

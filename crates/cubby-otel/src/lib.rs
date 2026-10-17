@@ -50,6 +50,17 @@ impl MetricsSink {
         let _ = self.try_push_seconds(name, seconds, labels);
     }
 
+    /// Pushes one event of counter-style metric `name` carrying `labels` (a gauge of 1).
+    pub fn push_count(&self, name: &str, labels: &[(&str, &str)]) {
+        let Some(addr) = &self.endpoint else {
+            return;
+        };
+        let body = self
+            .encode_unit(name, 1.0, "1", labels, SystemTime::now())
+            .encode_to_vec();
+        let _ = post(addr, &body, self.deadline);
+    }
+
     pub fn try_push_seconds(
         &self,
         name: &str,
@@ -72,6 +83,17 @@ impl MetricsSink {
         labels: &[(&str, &str)],
         now: SystemTime,
     ) -> ExportMetricsServiceRequest {
+        self.encode_unit(name, seconds, "s", labels, now)
+    }
+
+    pub fn encode_unit(
+        &self,
+        name: &str,
+        value: f64,
+        unit: &str,
+        labels: &[(&str, &str)],
+        now: SystemTime,
+    ) -> ExportMetricsServiceRequest {
         let t = now
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -79,12 +101,12 @@ impl MetricsSink {
         let point = NumberDataPoint {
             attributes: labels.iter().map(|(k, v)| kv(k, v)).collect(),
             time_unix_nano: t,
-            value: Some(Num::AsDouble(seconds)),
+            value: Some(Num::AsDouble(value)),
             ..Default::default()
         };
         let metric = Metric {
             name: name.into(),
-            unit: "s".into(),
+            unit: unit.into(),
             data: Some(Data::Gauge(Gauge {
                 data_points: vec![point],
             })),
@@ -226,6 +248,23 @@ mod tests {
             .map(|a| a.key.as_str())
             .collect();
         assert_eq!(keys, ["route", "status"]);
+    }
+
+    #[test]
+    fn a_count_is_a_gauge_of_one_with_unit_one() {
+        let s = MetricsSink::new(Some("x:1"), "cubby-server");
+        let req = s.encode_unit(
+            "cubby_device_auth",
+            1.0,
+            "1",
+            &[("outcome", "ok")],
+            SystemTime::UNIX_EPOCH,
+        );
+        let m = &req.resource_metrics[0].scope_metrics[0].metrics[0];
+        assert_eq!(
+            (m.name.as_str(), m.unit.as_str()),
+            ("cubby_device_auth", "1")
+        );
     }
 
     #[test]
