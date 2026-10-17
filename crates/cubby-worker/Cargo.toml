@@ -1,0 +1,12 @@
+[package]
+name = "cubby-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+cubby-otel = { path = "../cubby-otel" }
+cubby-core = { path = "../cubby-core" }
+cubby-db = { path = "../cubby-db" }
+cubby-yt = { path = "../cubby-yt" }

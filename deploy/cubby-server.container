@@ -1,0 +1,20 @@
+[Unit]
+Description=Cubby server
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/cubby:latest
+EnvironmentFile=-%h/.config/cubby/server.env
+# Loopback only: the Cloudflare tunnel is the sole way in.
+PublishPort=127.0.0.1:8790:8790
+Volume=cubby-data:/data:Z
+AutoUpdate=local
+
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target
