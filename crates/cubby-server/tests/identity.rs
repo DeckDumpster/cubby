@@ -479,3 +479,65 @@ async fn a_token_naming_an_unregistered_family_is_401_and_makes_no_file() {
             .exists()
     );
 }
+
+async fn child_post(e: &Env, path: &str, token: &str, body: Value) -> (StatusCode, Value) {
+    let r = Request::post(path)
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    e.call(r).await
+}
+
+#[tokio::test]
+async fn a_paired_device_plays_beats_and_ends_over_http() {
+    let e = env().await;
+    seed(&e);
+    let conn = e.family();
+    conn.execute_batch(
+        "INSERT INTO videos(youtube_id,title,duration_s) VALUES ('v1','one',600);
+         INSERT INTO allow_policies(id,kind,youtube_id,added_at) VALUES ('p','video','v1',0);
+         INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES ('v1',NULL,'p','approved',0);
+         INSERT INTO budgets(child_id,video_equivalents,window_s,cutoff_mid_play) VALUES ('c1',1,86400,0);",
+    )
+    .unwrap();
+    let code = ident::new_pairing_code(&conn, "c1", now())
+        .unwrap()
+        .unwrap();
+    let token = ident::redeem_pairing_code(&conn, &e.family_id, &code.code, None, now())
+        .unwrap()
+        .token;
+
+    let r = Request::post("/api/child/play")
+        .header("content-type", "application/json")
+        .body(Body::from(json!({"youtube_id": "v1"}).to_string()))
+        .unwrap();
+    assert_eq!(e.call(r).await.0, StatusCode::UNAUTHORIZED);
+
+    let (s, v) = child_post(&e, "/api/child/play", &token, json!({"youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let id = v["grant_id"].as_str().unwrap().to_string();
+    assert_eq!(v["remaining"]["videos"], 1.0);
+
+    let beat = format!("/api/child/grant/{id}/beat");
+    let (s, v) = child_post(
+        &e,
+        &beat,
+        &token,
+        json!({"position_s": 0, "state": "paused"}),
+    )
+    .await;
+    assert_eq!((s, &v["stop"]), (StatusCode::OK, &json!(false)));
+
+    let end = format!("/api/child/grant/{id}/end");
+    let (s, _) = child_post(&e, &end, &token, json!({"reason": "left"})).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = child_post(&e, &beat, &token, json!({"position_s": 1})).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+
+    let (s, v) = child_post(&e, "/api/child/play", &token, json!({"youtube_id": "nope"})).await;
+    assert_eq!(
+        (s, v["refused"].as_str()),
+        (StatusCode::OK, Some("not-allowed"))
+    );
+}
