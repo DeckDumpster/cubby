@@ -11,6 +11,7 @@ fn config(web_dir: &std::path::Path, otlp: &str) -> Config {
     Config::from_lookup(|k| match k {
         "CUBBY_WEB_DIR" => Some(web_dir.display().to_string()),
         "CUBBY_OTLP_ENDPOINT" => Some(otlp.to_string()),
+        "CUBBY_DATA_DIR" => Some(web_dir.join("data").display().to_string()),
         _ => None,
     })
     .unwrap()
@@ -39,7 +40,7 @@ async fn get(app: axum::Router, path: &str) -> (StatusCode, String) {
 
 #[tokio::test]
 async fn healthz_returns_200_ok_true() {
-    let (status, body) = get(app(&config(&web_dir(), "")), "/healthz").await;
+    let (status, body) = get(app(&config(&web_dir(), "")).unwrap(), "/healthz").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, r#"{"ok":true}"#);
 }
@@ -47,7 +48,7 @@ async fn healthz_returns_200_ok_true() {
 #[tokio::test]
 async fn spa_shell_is_served_for_the_root_and_client_routes() {
     for path in ["/", "/parent", "/watch/deep/link"] {
-        let (status, body) = get(app(&config(&web_dir(), "")), path).await;
+        let (status, body) = get(app(&config(&web_dir(), "")).unwrap(), path).await;
         assert_eq!(status, StatusCode::OK, "{path}");
         assert!(body.contains("cubby shell"), "{path}");
     }
@@ -78,7 +79,7 @@ async fn a_request_sends_one_sample_to_the_otlp_sink() {
             .unwrap();
         String::from_utf8_lossy(&got).into_owned()
     });
-    let (status, _) = get(app(&config(&web_dir(), &addr)), "/healthz").await;
+    let (status, _) = get(app(&config(&web_dir(), &addr)).unwrap(), "/healthz").await;
     assert_eq!(status, StatusCode::OK);
     let got = tokio::task::spawn_blocking(move || sink.join().unwrap())
         .await
@@ -90,6 +91,6 @@ async fn a_request_sends_one_sample_to_the_otlp_sink() {
 
 #[tokio::test]
 async fn an_empty_endpoint_sends_nothing() {
-    let (status, _) = get(app(&config(&web_dir(), "")), "/healthz").await;
+    let (status, _) = get(app(&config(&web_dir(), "")).unwrap(), "/healthz").await;
     assert_eq!(status, StatusCode::OK);
 }

@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 rusqlite.workspace = true
 ulid.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
