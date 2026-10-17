@@ -1,0 +1,12 @@
+{
+ "endpoint": "channels",
+ "params": {
+  "part": "contentDetails",
+  "id": "UCgone"
+ },
+ "response": {
+  "pageInfo": {
+   "totalResults": 0
+  }
+ }
+}
