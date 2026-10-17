@@ -1,4 +1,13 @@
-//! Family and registry SQLite storage: schema, migrations and queries land here.
+//! Family and registry SQLite storage: schema, migrations, the `playable` view and the registry.
+
+mod error;
+pub mod family;
+pub mod registry;
+mod schema;
+
+pub use error::{DbError, Result};
+pub use family::{FAMILY_VERSION, open_family};
+pub use registry::{Family, Registry};
 
 /// Name of the per-family database file for family `id`.
 pub fn family_file_name(id: &str) -> String {
