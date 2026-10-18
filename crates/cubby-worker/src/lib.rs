@@ -111,6 +111,7 @@ fn pass<T: Transport>(
     thumbs: Option<&Path>,
     outcome: &mut &'static str,
 ) -> Result<(), YtErr> {
+    resolve_handles(conn, client, now, outcome)?;
     let policies: Vec<Policy> = conn
         .prepare(
             "SELECT id, kind, youtube_id, child_id FROM allow_policies
@@ -145,6 +146,52 @@ fn pass<T: Transport>(
         expand(conn, client, p, now, thumbs, outcome)?;
     }
     refresh(conn, client, now, thumbs, outcome)
+}
+
+/// Rewrites channel policies still stored under an `@handle` to the channel's `UC` id: the Data
+/// API's `channels?id=` finds nothing for a handle. This is the migration for policies added
+/// before the id was resolved at add time, and the fallback when the server had no API key.
+fn resolve_handles<T: Transport>(
+    conn: &Connection,
+    client: &mut Client<T, DbMeter<'_>>,
+    now: i64,
+    outcome: &mut &'static str,
+) -> Result<(), YtErr> {
+    let stale = cubby_db::parent::handle_policies(conn).unwrap_or_default();
+    for (id, handle) in stale {
+        match soft(client.channel_lookup(true, &handle), outcome)? {
+            Some(Some(ch)) => {
+                if let Err(e) =
+                    cubby_db::parent::resolve_handle_policy(conn, &id, &ch.id, &handle, now)
+                {
+                    eprintln!("cubby-worker: resolving {handle}: {e}");
+                    *outcome = "error";
+                }
+            }
+            Some(None) => {
+                eprintln!("cubby-worker: no YouTube channel for {handle}");
+                *outcome = "error";
+            }
+            None => {}
+        }
+    }
+    Ok(())
+}
+
+/// Resolves a channel named by handle or legacy username to its `UC` id and title, spending
+/// quota from `conn`'s meter. Used when a parent adds the channel.
+pub fn lookup_channel<T: Transport>(
+    conn: &Connection,
+    transport: T,
+    now: i64,
+    lookup: &cubby_core::policy_url::ChannelLookup,
+) -> Result<Option<cubby_yt::ChannelInfo>, cubby_yt::YtError> {
+    use cubby_core::policy_url::ChannelLookup::*;
+    let mut client = Client::new(transport, DbMeter::new(conn, now));
+    match lookup {
+        Handle(h) => client.channel_lookup(true, h),
+        Username(u) => client.channel_lookup(false, u),
+    }
 }
 
 fn allow(conn: &Connection, id: &str, p: &Policy, state: &str, now: i64) {

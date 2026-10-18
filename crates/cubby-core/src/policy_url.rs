@@ -17,12 +17,23 @@ impl PolicyKind {
     }
 }
 
-/// What a pasted URL resolves to: a kind and the YouTube id (a channel `@handle` keeps its `@`
-/// until the worker resolves it).
+/// How a channel named by something other than its `UC` id is looked up at the Data API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelLookup {
+    /// `channels?forHandle=`; the handle keeps its `@`.
+    Handle(String),
+    /// `channels?forUsername=` (the legacy `/user/` form).
+    Username(String),
+}
+
+/// What a pasted URL resolves to: a kind and the YouTube id. A channel named by handle or legacy
+/// name carries `lookup` and its `youtube_id` is only the name: the Data API turns it into the
+/// `UC` id (a `channels?id=` lookup of a handle returns nothing).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     pub kind: PolicyKind,
     pub youtube_id: String,
+    pub lookup: Option<ChannelLookup>,
 }
 
 fn id_ok(s: &str) -> bool {
@@ -55,6 +66,7 @@ pub fn resolve_url(input: &str) -> Option<Resolved> {
         id_ok(id).then(|| Resolved {
             kind,
             youtube_id: id.to_string(),
+            lookup: None,
         })
     };
     match host.as_str() {
@@ -74,7 +86,24 @@ pub fn resolve_url(input: &str) -> Option<Resolved> {
                 h if h.starts_with('@') && id_ok(&h[1..]) => Some(Resolved {
                     kind: PolicyKind::Channel,
                     youtube_id: h.to_string(),
+                    lookup: Some(ChannelLookup::Handle(h.to_string())),
                 }),
+                "c" => {
+                    let name = parts.next()?;
+                    id_ok(name).then(|| Resolved {
+                        kind: PolicyKind::Channel,
+                        youtube_id: format!("@{name}"),
+                        lookup: Some(ChannelLookup::Handle(format!("@{name}"))),
+                    })
+                }
+                "user" => {
+                    let name = parts.next()?;
+                    id_ok(name).then(|| Resolved {
+                        kind: PolicyKind::Channel,
+                        youtube_id: name.to_string(),
+                        lookup: Some(ChannelLookup::Username(name.to_string())),
+                    })
+                }
                 _ => None,
             }
         }
@@ -141,6 +170,31 @@ mod tests {
             r("https://www.youtube.com/@BlueyOfficial/videos"),
             Some((PolicyKind::Channel, "@BlueyOfficial".into()))
         );
+    }
+
+    #[test]
+    fn a_handle_carries_its_lookup() {
+        let r = resolve_url("https://www.youtube.com/@SkyesPupSquad").unwrap();
+        assert_eq!(
+            r.lookup,
+            Some(ChannelLookup::Handle("@SkyesPupSquad".into()))
+        );
+    }
+
+    #[test]
+    fn legacy_c_and_user_urls_carry_a_lookup() {
+        let c = resolve_url("https://www.youtube.com/c/Bluey").unwrap();
+        assert_eq!(c.lookup, Some(ChannelLookup::Handle("@Bluey".into())));
+        let u = resolve_url("https://www.youtube.com/user/bluey/videos").unwrap();
+        assert_eq!(u.lookup, Some(ChannelLookup::Username("bluey".into())));
+        assert_eq!(resolve_url("https://www.youtube.com/c/"), None);
+        assert_eq!(resolve_url("https://www.youtube.com/user/"), None);
+    }
+
+    #[test]
+    fn a_channel_id_needs_no_lookup() {
+        let r = resolve_url("youtube.com/channel/UCabc_123-x").unwrap();
+        assert_eq!(r.lookup, None);
     }
 
     #[test]

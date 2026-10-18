@@ -97,6 +97,19 @@ pub fn add_policy(
     child: Option<&str>,
     now: i64,
 ) -> Result<String> {
+    add_policy_labelled(conn, kind, youtube_id, child, now, None)
+}
+
+/// [`add_policy`] that also keeps `label` (what the parent typed, e.g. an `@handle`) to show
+/// until the policy's own videos supply a title.
+pub fn add_policy_labelled(
+    conn: &Connection,
+    kind: &str,
+    youtube_id: &str,
+    child: Option<&str>,
+    now: i64,
+    label: Option<&str>,
+) -> Result<String> {
     if !matches!(kind, "video" | "channel" | "playlist") {
         return Err(DbError::Invalid(format!("unknown policy kind {kind:?}")));
     }
@@ -116,6 +129,12 @@ pub fn add_policy(
         "INSERT INTO allow_policies(id,kind,youtube_id,child_id,added_at) VALUES (?1,?2,?3,?4,?5)",
         params![id, kind, youtube_id, child, now],
     )?;
+    if let Some(label) = label {
+        conn.execute(
+            "INSERT INTO policy_label(policy_id,label) VALUES (?1,?2)",
+            params![id, label],
+        )?;
+    }
     match kind {
         "video" => {
             conn.execute(
@@ -144,13 +163,58 @@ pub fn remove_policy(conn: &Connection, id: &str, now: i64) -> Result<bool> {
     )? > 0)
 }
 
+/// Live channel policies still stored under an `@handle`: the Data API cannot expand those.
+pub fn handle_policies(conn: &Connection) -> Result<Vec<(String, String)>> {
+    let mut s = conn.prepare(
+        "SELECT id, youtube_id FROM allow_policies
+         WHERE kind='channel' AND youtube_id LIKE '@%' AND removed_at IS NULL
+         ORDER BY added_at, id",
+    )?;
+    let rows = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Re-keys the `@handle` channel policy `id` to the channel's `UC` id, keeping the handle as its
+/// label. When the same scope already allows that channel, the handle policy is removed instead.
+pub fn resolve_handle_policy(
+    conn: &Connection,
+    id: &str,
+    channel_id: &str,
+    label: &str,
+    now: i64,
+) -> Result<()> {
+    let dup: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM allow_policies o, allow_policies p
+           WHERE p.id=?1 AND o.id<>p.id AND o.kind='channel' AND o.youtube_id=?2
+             AND o.child_id IS p.child_id AND o.removed_at IS NULL)",
+        params![id, channel_id],
+        |r| r.get(0),
+    )?;
+    if dup {
+        conn.execute(
+            "UPDATE allow_policies SET removed_at=?2 WHERE id=?1",
+            params![id, now],
+        )?;
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE allow_policies SET youtube_id=?2 WHERE id=?1",
+        params![id, channel_id],
+    )?;
+    conn.execute(
+        "INSERT OR REPLACE INTO policy_label(policy_id,label) VALUES (?1,?2)",
+        params![id, label],
+    )?;
+    Ok(())
+}
+
 pub fn list_policies(conn: &Connection) -> Result<Vec<Policy>> {
     let mut s = conn.prepare(
         "SELECT p.id, p.kind, p.youtube_id, p.child_id, p.added_at,
             COALESCE(CASE p.kind
               WHEN 'video' THEN (SELECT title FROM videos WHERE youtube_id=p.youtube_id)
               WHEN 'channel' THEN (SELECT channel_title FROM videos WHERE channel_id=p.youtube_id LIMIT 1)
-            END, ''),
+            END, (SELECT label FROM policy_label WHERE policy_id=p.id), ''),
             CASE p.kind
               WHEN 'video' THEN NOT EXISTS (SELECT 1 FROM videos WHERE youtube_id = p.youtube_id)
               ELSE NOT EXISTS (SELECT 1 FROM allowed_videos a WHERE a.policy_id = p.id)

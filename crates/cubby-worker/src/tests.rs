@@ -230,3 +230,64 @@ fn a_pass_pushes_run_seconds_with_its_outcome() {
     let got = f.wait_for("cubby_worker_run_seconds");
     assert_eq!(got[0].label("outcome"), Some("disabled"));
 }
+
+#[test]
+fn a_stored_handle_policy_is_rewritten_to_its_channel_id_and_expands() {
+    let c = db(&[("p1", "channel", "@Handle")]);
+    let mut t = fixtures();
+    t.add(
+        "channels",
+        &[("part", "snippet"), ("forHandle", "@Handle")],
+        json!({"items": [{"id": "UCchan", "snippet": {"title": "Chan"}}]}),
+    );
+    let r = run_pass(&c, &t, T0, None);
+    assert_eq!(r.outcome, "ok");
+    assert_eq!(
+        strings(&c, "SELECT youtube_id FROM allow_policies"),
+        ["UCchan"]
+    );
+    assert_eq!(
+        strings(&c, "SELECT label FROM policy_label WHERE policy_id='p1'"),
+        ["@Handle"]
+    );
+    assert_eq!(
+        strings(
+            &c,
+            "SELECT CAST(count(*) AS TEXT) FROM allowed_videos WHERE policy_id='p1'"
+        ),
+        ["5"]
+    );
+}
+
+#[test]
+fn a_handle_that_does_not_resolve_is_left_alone_and_reported() {
+    let c = db(&[("p1", "channel", "@Ghost")]);
+    let mut t = fixtures();
+    t.add(
+        "channels",
+        &[("part", "snippet"), ("forHandle", "@Ghost")],
+        json!({"items": []}),
+    );
+    let r = run_pass(&c, &t, T0, None);
+    assert_eq!(r.outcome, "error");
+    assert_eq!(
+        strings(&c, "SELECT youtube_id FROM allow_policies"),
+        ["@Ghost"]
+    );
+}
+
+#[test]
+fn a_handle_policy_whose_channel_is_already_allowed_is_dropped() {
+    let c = db(&[("p1", "channel", "UCchan"), ("p2", "channel", "@Handle")]);
+    let mut t = fixtures();
+    t.add(
+        "channels",
+        &[("part", "snippet"), ("forHandle", "@Handle")],
+        json!({"items": [{"id": "UCchan", "snippet": {"title": "Chan"}}]}),
+    );
+    run_pass(&c, &t, T0, None);
+    assert_eq!(
+        strings(&c, "SELECT id FROM allow_policies WHERE removed_at IS NULL"),
+        ["p1"]
+    );
+}

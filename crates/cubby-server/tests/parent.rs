@@ -51,6 +51,15 @@ async fn env_with(access: bool, otlp: &str) -> Env {
 }
 
 async fn env_full(access: bool, otlp: &str, ingest: Option<cubby_server::Ingest>) -> Env {
+    env_hooks(access, otlp, ingest, None).await
+}
+
+async fn env_hooks(
+    access: bool,
+    otlp: &str,
+    ingest: Option<cubby_server::Ingest>,
+    resolver: Option<cubby_server::ChannelResolver>,
+) -> Env {
     let dir = temp_dir();
     let provider = Provider::start().await;
     let cfg = Config::from_lookup(|k| match k {
@@ -65,7 +74,7 @@ async fn env_full(access: bool, otlp: &str, ingest: Option<cubby_server::Ingest>
     let mut registry = Registry::open(&data).unwrap();
     let family_id = registry.create_family(PARENT).unwrap().id;
     drop(registry);
-    let router = cubby_server::app_with_ingest(&cfg, ingest).unwrap();
+    let router = cubby_server::app_with_hooks(&cfg, ingest, resolver).unwrap();
     Env {
         router,
         dir,
@@ -529,4 +538,85 @@ async fn the_parents_endpoint_lists_every_parent_of_the_family() {
     let (s, body) = e.parent("GET", "/api/parent/parents", None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body, json!(["kim@gmail.com", PARENT]));
+}
+
+/// A resolver backed by a fake Data API that knows one channel, by handle and by username.
+fn fixture_resolver() -> cubby_server::ChannelResolver {
+    std::sync::Arc::new(
+        |conn: &Connection, l: &cubby_core::policy_url::ChannelLookup| {
+            let mut t = cubby_yt::FixtureTransport::default();
+            let found = json!({"items": [{"id": "UCxgpotnLEd1OeAo5t8f2XLQ",
+            "snippet": {"title": "Skye's Pup Squad"}}]});
+            t.add(
+                "channels",
+                &[("part", "snippet"), ("forHandle", "@SkyesPupSquad")],
+                found.clone(),
+            );
+            t.add(
+                "channels",
+                &[("part", "snippet"), ("forUsername", "skyeold")],
+                found,
+            );
+            t.add(
+                "channels",
+                &[("part", "snippet"), ("forHandle", "@nobodyhere")],
+                json!({"pageInfo": {"totalResults": 0}}),
+            );
+            cubby_worker::lookup_channel(conn, &t, now(), l).map_err(|e| e.to_string())
+        },
+    )
+}
+
+#[tokio::test]
+async fn a_channel_added_by_handle_is_stored_under_its_uc_id() {
+    let e = env_hooks(true, "", None, Some(fixture_resolver())).await;
+    for url in [
+        "https://www.youtube.com/@SkyesPupSquad",
+        "https://www.youtube.com/c/SkyesPupSquad",
+        "https://www.youtube.com/user/skyeold",
+    ] {
+        let (s, p) = e
+            .parent("POST", "/api/parent/policies", Some(json!({"url": url})))
+            .await;
+        assert_eq!(s, StatusCode::OK, "{url}: {p}");
+        assert_eq!(p["youtube_id"], "UCxgpotnLEd1OeAo5t8f2XLQ", "{url}");
+        assert_eq!(p["title"], "Skye's Pup Squad", "{url}");
+    }
+    let (_, pols) = e.parent("GET", "/api/parent/policies", None).await;
+    assert_eq!(pols.as_array().unwrap().len(), 1, "one channel, one policy");
+    assert_eq!(pols[0]["youtube_id"], "UCxgpotnLEd1OeAo5t8f2XLQ");
+    assert_eq!(pols[0]["title"], "@SkyesPupSquad");
+}
+
+#[tokio::test]
+async fn the_preview_shows_the_channel_title() {
+    let e = env_hooks(true, "", None, Some(fixture_resolver())).await;
+    let (s, p) = e
+        .parent(
+            "POST",
+            "/api/parent/policies/preview",
+            Some(json!({"url": "https://www.youtube.com/@SkyesPupSquad"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    assert_eq!(p["title"], "Skye's Pup Squad");
+    assert_eq!(p["youtube_id"], "UCxgpotnLEd1OeAo5t8f2XLQ");
+}
+
+#[tokio::test]
+async fn an_unknown_handle_is_a_400_with_a_message_and_stores_nothing() {
+    let e = env_hooks(true, "", None, Some(fixture_resolver())).await;
+    for path in ["/api/parent/policies", "/api/parent/policies/preview"] {
+        let (s, p) = e
+            .parent(
+                "POST",
+                path,
+                Some(json!({"url": "https://www.youtube.com/@nobodyhere"})),
+            )
+            .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{path}: {p}");
+        assert_eq!(p["error"], "no YouTube channel was found for @nobodyhere");
+    }
+    let (_, pols) = e.parent("GET", "/api/parent/policies", None).await;
+    assert_eq!(pols.as_array().unwrap().len(), 0);
 }

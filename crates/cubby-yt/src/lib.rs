@@ -83,6 +83,13 @@ pub struct ItemsPage {
     pub next_page_token: Option<String>,
 }
 
+/// A channel as the Data API names it: the `UC` id and its title.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChannelInfo {
+    pub id: String,
+    pub title: String,
+}
+
 pub struct Client<T, M> {
     transport: T,
     meter: M,
@@ -146,6 +153,33 @@ impl<T: Transport, M: Meter> Client<T, M> {
                 .as_str()
                 .map(str::to_string),
         )
+    }
+
+    /// Looks a channel up by `@handle` (`forHandle`) or legacy username (`forUsername`); `None`
+    /// when the Data API knows no such channel.
+    pub fn channel_lookup(
+        &mut self,
+        by_handle: bool,
+        name: &str,
+    ) -> Result<Option<ChannelInfo>, YtError> {
+        let key = if by_handle {
+            "forHandle"
+        } else {
+            "forUsername"
+        };
+        let body = self.call(
+            "channels",
+            CHANNELS_LIST_COST,
+            &[("part", "snippet"), (key, name)],
+        )?;
+        let item = &body["items"][0];
+        Ok(item["id"].as_str().map(|id| ChannelInfo {
+            id: id.to_string(),
+            title: item["snippet"]["title"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        }))
     }
 
     pub fn playlist_items(

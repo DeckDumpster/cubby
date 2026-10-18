@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
 use cubby_core::budget::{parse_windows, valid_tz};
-use cubby_core::policy_url::resolve_url;
+use cubby_core::policy_url::{ChannelLookup, resolve_url};
 use cubby_db::DbError;
 use cubby_db::parent::{self as store, Budget};
 use serde::Deserialize;
@@ -230,11 +230,72 @@ struct UrlBody {
     child_id: Option<String>,
 }
 
-async fn preview(Json(b): Json<UrlBody>) -> Result<Json<Value>> {
-    let r = resolve_url(&b.url)
+/// A pasted link's policy with a channel named by handle or legacy name turned into its `UC` id.
+struct Target {
+    kind: &'static str,
+    youtube_id: String,
+    /// What the parent typed for a channel that was looked up, kept for display.
+    label: Option<String>,
+    title: Option<String>,
+}
+
+async fn resolve_target(s: &Arc<AppState>, f: &ParentOf, url: &str) -> Result<Target> {
+    let r = resolve_url(url)
         .ok_or_else(|| bad("that is not a YouTube video, channel or playlist link"))?;
+    let kind = r.kind.as_str();
+    let Some(lookup) = r.lookup else {
+        return Ok(Target {
+            kind,
+            youtube_id: r.youtube_id,
+            label: None,
+            title: None,
+        });
+    };
+    let Some(resolver) = s.resolver.clone() else {
+        // No API key: a handle is kept as typed and the worker resolves it on its next pass.
+        return match lookup {
+            ChannelLookup::Handle(_) => Ok(Target {
+                kind,
+                youtube_id: r.youtube_id,
+                label: None,
+                title: None,
+            }),
+            ChannelLookup::Username(n) => Err(bad(&format!(
+                "cannot look up the channel {n} right now; paste its /channel/ or @handle link"
+            ))),
+        };
+    };
+    let name = r.youtube_id.clone();
+    let (state, family) = (s.clone(), f.0.clone());
+    let found = tokio::task::spawn_blocking(move || {
+        let c = open_own(&state, &family).map_err(|e| e.1)?;
+        resolver(&c, &lookup)
+    })
+    .await
+    .map_err(ApiError::internal)?;
+    match found {
+        Ok(Some(ch)) => Ok(Target {
+            kind,
+            youtube_id: ch.id,
+            label: Some(name),
+            title: Some(ch.title),
+        }),
+        Ok(None) => Err(bad(&format!("no YouTube channel was found for {name}"))),
+        Err(e) => Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            format!("could not look up {name} on YouTube: {e}"),
+        )),
+    }
+}
+
+async fn preview(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    Json(b): Json<UrlBody>,
+) -> Result<Json<Value>> {
+    let t = resolve_target(&s, &f, &b.url).await?;
     Ok(Json(
-        json!({"kind": r.kind.as_str(), "youtube_id": r.youtube_id}),
+        json!({"kind": t.kind, "youtube_id": t.youtube_id, "title": t.title}),
     ))
 }
 
@@ -243,20 +304,20 @@ async fn add_policy(
     Extension(f): Extension<ParentOf>,
     Json(b): Json<UrlBody>,
 ) -> Result<Json<Value>> {
-    let r = resolve_url(&b.url)
-        .ok_or_else(|| bad("that is not a YouTube video, channel or playlist link"))?;
+    let r = resolve_target(&s, &f, &b.url).await?;
     let c = conn(&s, &f)?;
     if let Some(child) = &b.child_id
         && cubby_db::identity::child(&c, child)?.is_none()
     {
         return Err(not_found("child"));
     }
-    let id = store::add_policy(
+    let id = store::add_policy_labelled(
         &c,
-        r.kind.as_str(),
+        r.kind,
         &r.youtube_id,
         b.child_id.as_deref(),
         unix_now(),
+        r.label.as_deref(),
     )?;
     // Ingest before answering so the child sees the video at once; a failure here leaves the
     // policy pending for the worker's next pass.
@@ -271,7 +332,7 @@ async fn add_policy(
         .await;
     }
     Ok(Json(
-        json!({"id": id, "kind": r.kind.as_str(), "youtube_id": r.youtube_id}),
+        json!({"id": id, "kind": r.kind, "youtube_id": r.youtube_id, "title": r.title}),
     ))
 }
 
