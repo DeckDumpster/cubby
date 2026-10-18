@@ -241,6 +241,36 @@ async fn allow_a_channel_block_one_video_and_the_channel_stays_allowed() {
 }
 
 #[tokio::test]
+async fn the_library_lists_groups_then_a_groups_videos_and_searches_them() {
+    let e = env().await;
+    e.videos();
+    e.parent(
+        "POST",
+        "/api/parent/policies",
+        Some(json!({"url": "youtube.com/channel/ch1"})),
+    )
+    .await;
+    let (s, lib) = e.parent("GET", "/api/parent/library", None).await;
+    assert_eq!(s, StatusCode::OK, "{lib}");
+    assert_eq!(lib["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(lib["groups"][0]["key"], "ch1");
+    assert_eq!(lib["groups"][0]["count"], 2);
+    let (_, vids) = e
+        .parent("GET", "/api/parent/library/videos?group=ch1&sort=plays", None)
+        .await;
+    assert_eq!(vids["total"], 2);
+    assert_eq!(vids["videos"][0]["plays"], 0);
+    let (s, _) = e
+        .parent("GET", "/api/parent/library/videos?group=ch1&sort=zz", None)
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (_, none) = e
+        .parent("GET", "/api/parent/library?q=nomatchatall", None)
+        .await;
+    assert!(none["groups"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn approving_a_more_from_channel_request_adds_a_policy_and_opens_the_channel() {
     let e = env().await;
     e.videos();

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Library from '$lib/Library.svelte';
 	import { getParent } from '$lib/parentState.svelte.js';
 
 	const ps = getParent();
@@ -25,4 +26,6 @@
 			</li>
 		{:else}<li class="empty">Nothing is allowed yet, so children see nothing.</li>{/each}
 	</ul>
+	<h3>Allowed videos</h3>
+	<Library view="allow" />
 </section>
