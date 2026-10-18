@@ -4,9 +4,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::error::ApiError;
-use crate::identity::{ParentOf, open_own};
-use axum::Extension;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
@@ -55,63 +52,6 @@ impl ChildApi {
             }),
         }
     }
-}
-
-/// Mounted behind the device guard, which supplies the family and the [`Device`].
-pub(crate) fn routes() -> axum::Router<Arc<crate::AppState>> {
-    Router::new()
-        .route("/api/child/home", get(home_route))
-        .route("/api/child/search", get(search_route))
-        .route("/api/child/next", get(next_route))
-}
-
-/// A catalogue handle over the device's own family database.
-fn api_for(state: &crate::AppState, family_id: &str) -> Result<(ChildApi, Connection), ApiError> {
-    let conn = open_own(state, family_id)?;
-    let api = ChildApi::new(
-        Connection::open_in_memory().map_err(ApiError::internal)?,
-        Arc::new(|_| None),
-        Arc::new(|c, child| crate::play::remaining_value(c, child, crate::play::unix_now())),
-    );
-    Ok((api, conn))
-}
-
-async fn home_route(
-    State(state): State<Arc<crate::AppState>>,
-    Extension(ParentOf(family_id)): Extension<ParentOf>,
-    Extension(dev): Extension<Device>,
-) -> Result<Json<Value>, ApiError> {
-    let (api, conn) = api_for(&state, &family_id)?;
-    home_json(&api, &conn, &dev.child_id)
-        .map(Json)
-        .map_err(ApiError::internal)
-}
-
-async fn search_route(
-    State(state): State<Arc<crate::AppState>>,
-    Extension(ParentOf(family_id)): Extension<ParentOf>,
-    Extension(dev): Extension<Device>,
-    Query(p): Query<SearchParams>,
-) -> Result<Json<Value>, ApiError> {
-    let conn = open_own(&state, &family_id)?;
-    let found =
-        browse::search(&conn, &dev.child_id, &p.q, SEARCH_LIMIT).map_err(ApiError::internal)?;
-    Ok(Json(json!({
-        "q": p.q,
-        "tiles": found.iter().map(tile).collect::<Vec<_>>(),
-    })))
-}
-
-async fn next_route(
-    State(state): State<Arc<crate::AppState>>,
-    Extension(ParentOf(family_id)): Extension<ParentOf>,
-    Extension(dev): Extension<Device>,
-    Query(p): Query<NextParams>,
-) -> Result<Json<Value>, ApiError> {
-    let (api, conn) = api_for(&state, &family_id)?;
-    next_json(&api, &conn, &dev.child_id, &p.after)
-        .map(Json)
-        .map_err(ApiError::internal)
 }
 
 pub fn router(api: ChildApi) -> Router {

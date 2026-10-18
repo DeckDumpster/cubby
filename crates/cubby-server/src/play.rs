@@ -121,17 +121,6 @@ fn usage(conn: &Connection, child: &str, b: &Budget, now: i64) -> rusqlite::Resu
     )
 }
 
-/// What a child has left, as the catalogue reports it beside the tiles.
-pub(crate) fn remaining_value(conn: &Connection, child: &str, now: i64) -> Value {
-    let Ok(b) = load_budget(conn, child) else {
-        return Value::Null;
-    };
-    match usage(conn, child, &b, now) {
-        Ok(u) => remaining_json(budget::remaining(&b, u)),
-        Err(_) => Value::Null,
-    }
-}
-
 /// Closes every grant that has gone [`budget::BEAT_TIMEOUT_S`] without a beat. The charge was
 /// kept current by the beats, so closing only stamps the end.
 pub fn reap_stale(conn: &Connection, now: i64) -> rusqlite::Result<usize> {
