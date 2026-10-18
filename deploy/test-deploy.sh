@@ -7,12 +7,19 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # --- Access: parent is gated, child and static are bypass, one app per path set.
 acc=cloudflare/access.json
-jq -e '.hostname == "cubby.gantt.pub"' "$acc" >/dev/null || fail "hostname"
-jq -e '[.apps[] | select(.name=="cubby-parent") | .paths[]] | sort == ["/api/parent*","/parent*"]' "$acc" >/dev/null || fail "parent paths"
-jq -e '.apps[] | select(.name=="cubby-parent") | .policy.decision == "allow" and (.policy.emails|length)==1' "$acc" >/dev/null || fail "parent policy must allow exactly one email"
-jq -e '[.apps[] | select(.name=="cubby-public") | .paths[]] | index("/watch*") != null and index("/api/child*") != null' "$acc" >/dev/null || fail "child paths bypass"
-jq -e '.apps[] | select(.name=="cubby-public") | .policy.decision == "bypass"' "$acc" >/dev/null || fail "public bypass"
-jq -e '[.apps[].paths[]] | all(. != "/*" and . != "/")' "$acc" >/dev/null || fail "no catch-all app"
+# node, not jq: ci.sh guarantees node on PATH, the testenv image has no jq.
+node - "$acc" <<'JS' || fail "access policy split"
+const a = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+const bad = (m) => { console.error("access: " + m); process.exit(1); };
+if (a.hostname !== "cubby.gantt.pub") bad("hostname");
+const app = (n) => a.apps.find((x) => x.name === n) || bad("missing app " + n);
+const parent = app("cubby-parent"), pub = app("cubby-public");
+if (JSON.stringify([...parent.paths].sort()) !== JSON.stringify(["/api/parent*", "/parent*"])) bad("parent paths");
+if (parent.policy.decision !== "allow" || parent.policy.emails.length !== 1) bad("parent policy must allow exactly one email");
+if (!pub.paths.includes("/watch*") || !pub.paths.includes("/api/child*")) bad("child paths bypass");
+if (pub.policy.decision !== "bypass") bad("public bypass");
+if (a.apps.some((x) => x.paths.some((p) => p === "/*" || p === "/"))) bad("no catch-all app");
+JS
 
 # --- Tunnel: ingress to loopback 8790 with a 404 catch-all.
 grep -q 'hostname: cubby.gantt.pub' cloudflare/tunnel.yml || fail "tunnel hostname"
