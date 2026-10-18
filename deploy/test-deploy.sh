@@ -47,6 +47,9 @@ case "$out" in *"Cubby production is 'ubuntu-mini-0'"*) ;; *) fail "refusal does
 rm -rf "$rh"
 export CUBBY_DEPLOY_HOSTNAME=ubuntu-mini-0
 
+# --- push-prod.sh connects by the tailnet name by default, not the bare hostname.
+[ "$(env -u CUBBY_PROD_SSH CUBBY_PUSH_PRINT_TARGET=1 ./push-prod.sh)" = ryangantt@ubuntu-mini-0.tailb4a728.ts.net ] || fail "push-prod default destination is not the tailnet name"
+
 # --- Access settings: an empty server.env with no Terraform makes deploy refuse, naming all three;
 # a deploy from scratch with Terraform outputs available ends with them set.
 a="$(mktemp -d)"; fakebin="$(mktemp -d)"
