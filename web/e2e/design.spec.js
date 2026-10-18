@@ -118,7 +118,7 @@ for (const [size, viewport] of SIZES) {
 			await page.goto('/watch');
 			await page.getByLabel('search').fill('cats');
 			await page.getByRole('button', { name: 'Search' }).click();
-			await expect(page.getByRole('heading', { name: 'Search results' })).toBeVisible();
+			await expect(page.getByRole('heading', { name: /Videos about cats/ })).toBeVisible();
 			await check(page, 'search', size);
 		});
 
