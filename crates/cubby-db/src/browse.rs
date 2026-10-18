@@ -149,12 +149,6 @@ pub mod fixture {
             rusqlite::params![id, title, channel, tags, 1_000_000 - age],
         )
         .unwrap();
-        c.execute(
-            "INSERT INTO videos_fts(rowid,title,channel_title,tags) \
-             SELECT rowid,title,channel_title,tags FROM videos WHERE youtube_id=?1",
-            [id],
-        )
-        .unwrap();
     }
 
     pub fn allow(c: &Connection, id: &str, child: &str, state: &str) {

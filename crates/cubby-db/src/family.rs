@@ -9,7 +9,11 @@ use crate::schema;
 /// The family schema version this build understands: one migration per version.
 pub const FAMILY_VERSION: i64 = MIGRATIONS.len() as i64;
 
-const MIGRATIONS: [&str; 2] = [include_str!("family_v1.sql"), include_str!("family_v2.sql")];
+const MIGRATIONS: [&str; 3] = [
+    include_str!("family_v1.sql"),
+    include_str!("family_v2.sql"),
+    include_str!("family_v3.sql"),
+];
 
 /// Brings `conn` up to this build's family schema; refuses a newer one.
 pub fn migrate_family(conn: &mut Connection) -> Result<()> {
@@ -61,6 +65,49 @@ mod tests {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(v, FAMILY_VERSION);
+    }
+
+    fn search(c: &Connection, q: &str) -> Vec<String> {
+        let mut st = c
+            .prepare(
+                "SELECT v.youtube_id FROM videos_fts f JOIN videos v ON v.rowid=f.rowid \
+                 WHERE videos_fts MATCH ?1 ORDER BY v.youtube_id",
+            )
+            .unwrap();
+        st.query_map([q], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn videos_are_indexed_on_insert_update_and_delete() {
+        let c = mem();
+        c.execute_batch(
+            "INSERT INTO videos(youtube_id,title,channel_title,tags) VALUES ('v1','Golden hour','Sun TV','[\"calm\"]');",
+        )
+        .unwrap();
+        assert_eq!(search(&c, "golden"), ["v1"]);
+        assert_eq!(search(&c, "sun"), ["v1"]);
+        assert_eq!(search(&c, "calm"), ["v1"]);
+        c.execute("UPDATE videos SET title='Silver' WHERE youtube_id='v1'", [])
+            .unwrap();
+        assert!(search(&c, "golden").is_empty());
+        assert_eq!(search(&c, "silver"), ["v1"]);
+        c.execute("DELETE FROM videos WHERE youtube_id='v1'", [])
+            .unwrap();
+        assert!(search(&c, "silver").is_empty());
+    }
+
+    #[test]
+    fn migration_rebuilds_the_index_of_an_existing_file() {
+        let mut c = Connection::open_in_memory().unwrap();
+        schema::migrate(&mut c, "family", &MIGRATIONS[..2]).unwrap();
+        c.execute("INSERT INTO videos(youtube_id,title) VALUES ('v1','Golden')", [])
+            .unwrap();
+        assert!(search(&c, "golden").is_empty());
+        migrate_family(&mut c).unwrap();
+        assert_eq!(search(&c, "golden"), ["v1"]);
     }
 
     fn seed(c: &Connection) {
