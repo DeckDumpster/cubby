@@ -86,6 +86,7 @@
 		.pill { display: inline-block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.1em 0.55em; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 
 		.list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+		.list + * { margin-top: var(--space-3); }
 		.list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); }
 		.list li.empty { color: var(--muted); justify-content: center; padding: var(--space-5) var(--space-3); border-style: dashed; background: transparent; text-align: center; }
 		.card .list li { background: var(--surface-2); border: 0; }
