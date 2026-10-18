@@ -64,7 +64,9 @@ async function setup(page, { home = HOME, play = { grant_id: 'g1', remaining: { 
 async function check(page, name, size) {
 	await page.waitForTimeout(150);
 	await page.screenshot({ path: `${OUT}/${name}-${size}.png`, fullPage: true });
-	const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+	const run = () => new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+	// axe can lose its frame under a loaded runner; one retry, never a skip.
+	const r = await run().catch(run);
 	expect(r.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(' | ')}`)).toEqual([]);
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
 	expect(overflow).toBeLessThanOrEqual(0);
