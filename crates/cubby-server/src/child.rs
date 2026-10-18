@@ -158,7 +158,15 @@ fn home_with(
             .cmp(&a.published_at)
             .then_with(|| a.youtube_id.cmp(&b.youtube_id))
     });
+    let child = conn
+        .query_row(
+            "SELECT name, avatar FROM children WHERE id=?1",
+            [child_id],
+            |r| Ok(json!({"name": r.get::<_, String>(0)?, "avatar": r.get::<_, String>(1)?})),
+        )
+        .unwrap_or(Value::Null);
     Ok(json!({
+        "child": child,
         "remaining": remaining,
         "sections": [
             {"key": "continue", "title": "Keep watching", "tiles": cont},

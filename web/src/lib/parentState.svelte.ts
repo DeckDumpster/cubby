@@ -1,6 +1,8 @@
 import { getContext, setContext } from 'svelte';
 import { api, budgetBody, windowsToText } from '$lib/parent.js';
 
+export const AVATARS = ['🦊', '🐻', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐢', '🐶', '🐱', '🚀'];
+
 export type Device = { id: string; label: string; revoked_at: number | null };
 export type Child = {
 	id: string;
@@ -110,10 +112,16 @@ export class ParentState {
 			const r = await api('POST', `/api/parent/children/${id}/pairing`);
 			this.pairing = { child: id, code: r.code };
 		});
+	setAvatar = (c: Child, avatar: string) =>
+		this.run(async () => {
+			await api('PUT', `/api/parent/children/${c.id}`, { name: c.name, avatar, tz: c.tz });
+			await this.load();
+		});
 	addChild = () =>
 		this.run(async () => {
 			await api('POST', '/api/parent/children', this.newChild);
 			this.newChild.name = '';
+			this.newChild.avatar = '';
 			await this.load();
 		});
 }
