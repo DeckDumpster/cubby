@@ -10,7 +10,7 @@ records="${DNS_DIFF_RECORDS:-$here/../infra/dns-records.json}"
 dig_bin="${DNS_DIFF_DIG:-dig}"
 [ $# -ge 1 ] && [ $# -le 2 ] || { echo "usage: dns-diff.sh <target-nameserver> [<route53-nameserver>]" >&2; exit 2; }
 target="$1"
-zone="$(jq -r '.[0].name' "$records" | awk -F. '{print $(NF-1)"."$NF}')"
+zone="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["name"])' "$records" | awk -F. '{print $(NF-1)"."$NF}')"
 
 r53="${2:-}"
 if [ -z "$r53" ]; then
@@ -37,6 +37,14 @@ while IFS=$'\t' read -r name type want; do
         echo "UNDECLARED $name $type: $target answers [${got_t//$'\n'/, }], Terraform declares [${expect//$'\n'/, }]"
         fail=1
     fi
-done < <(jq -r 'group_by([.name,.type])[] | [.[0].name, .[0].type, (map(if .priority then "\(.priority) \(.content)" else .content end) | join("|"))] | @tsv' "$records")
+done < <(python3 -I -c '
+import json, sys
+groups = {}
+for r in json.load(open(sys.argv[1])):
+    c = "%s %s" % (r["priority"], r["content"]) if r.get("priority") else r["content"]
+    groups.setdefault((r["name"], r["type"]), []).append(c)
+for (n, t), cs in sorted(groups.items()):
+    print("\t".join([n, t, "|".join(cs)]))
+' "$records")
 [ "$fail" = 0 ] && echo "dns parity ok: $target matches $r53 for all records in $(basename "$records")"
 exit "$fail"
