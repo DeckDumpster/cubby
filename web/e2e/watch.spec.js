@@ -183,7 +183,7 @@ test.describe('leaving a search', () => {
 
 	test('the clear button returns home', async ({ page }) => {
 		await searched(page);
-		await page.getByRole('button', { name: 'Clear search' }).click();
+		await page.getByRole('button', { name: 'Clear' }).click();
 		await atHome(page);
 	});
 	test('the Home control returns home', async ({ page }) => {

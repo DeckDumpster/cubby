@@ -306,7 +306,7 @@
 			<form class="search" role="search" onsubmit={search}>
 				<span class="box">
 					<input type="search" aria-label="search" placeholder="Search" bind:value={query} oninput={onSearchInput} />
-					{#if query}<button type="button" class="clear" aria-label="Clear search" onclick={home}>✕</button>{/if}
+					{#if query}<button type="button" class="clear" aria-label="Clear" onclick={home}>✕</button>{/if}
 				</span>
 				<button type="submit">Search</button>
 			</form>
