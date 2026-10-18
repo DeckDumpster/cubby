@@ -74,20 +74,40 @@ async fn parent_guard(
     req: Request,
     next: Next,
 ) -> Result<Response> {
-    let access = state
-        .access
-        .as_ref()
-        .ok_or_else(|| ApiError::unauthorized("Cloudflare Access is not configured"))?;
+    let Some(access) = state.access.as_ref() else {
+        state.count("cubby_parent_auth", "unconfigured");
+        return Err(ApiError::unauthorized(
+            "Cloudflare Access is not configured",
+        ));
+    };
     let (parts, body) = req.into_parts();
-    let token = extract_token(&parts).ok_or_else(missing_token)?;
-    let identity = access.verify(&token).await?;
+    let Some(token) = extract_token(&parts) else {
+        state.count("cubby_parent_auth", "missing");
+        return Err(missing_token());
+    };
+    let identity = match access.verify(&token).await {
+        Ok(i) => i,
+        Err(e) => {
+            state.count("cubby_parent_auth", "invalid");
+            return Err(e);
+        }
+    };
     let family = {
         let registry = state.registry.lock().map_err(ApiError::internal)?;
         db(registry.lookup(identity.email()))?
     };
-    let family =
-        family.ok_or_else(|| ApiError::new(StatusCode::FORBIDDEN, "not a parent of any family"))?;
+    let Some(family) = family else {
+        state.count("cubby_parent_auth", "not_a_parent");
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "not a parent of any family",
+        ));
+    };
+    state.count("cubby_parent_auth", "ok");
     let mut req = Request::from_parts(parts, body);
+    if let Some(actor) = req.extensions().get::<crate::Actor>() {
+        actor.set(format!("parent:{}", identity.email()));
+    }
     req.extensions_mut().insert(ParentOf(family.id));
     Ok(next.run(req).await)
 }
@@ -124,6 +144,9 @@ async fn device_guard(
     };
     state.count("cubby_device_auth", "ok");
     let (family_id, device) = device;
+    if let Some(actor) = req.extensions().get::<crate::Actor>() {
+        actor.set(format!("device:{}", device.id));
+    }
     req.extensions_mut().insert(ParentOf(family_id));
     req.extensions_mut().insert(device);
     Ok(next.run(req).await)

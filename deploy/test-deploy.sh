@@ -91,6 +91,13 @@ rm -f "$t.sum1" "$t.sum2"
 [ -f "$t/cubby/server.env" ] || fail "server.env not created"
 [ -f "$t/cubby/worker.env" ] || fail "worker.env not created"
 
+# --- Deploy writes the OTLP endpoint (once) into both env files.
+want="CUBBY_OTLP_ENDPOINT=$(tr -d '[:space:]' < otlp-endpoint)"
+for e in server.env worker.env; do
+    grep -qx "$want" "$t/cubby/$e" || fail "$e lacks $want"
+    [ "$(grep -c '^CUBBY_OTLP_ENDPOINT=' "$t/cubby/$e")" = 1 ] || fail "$e has a duplicate OTLP endpoint"
+done
+
 # --- Every env file a unit names must be created by deploy, or deploy must skip the unit without it.
 for f in *.container *.service; do
     for name in $(grep -hoE '(EnvironmentFile=|--env-file=)[^ ]*' "$f" | sed 's|.*/||'); do
