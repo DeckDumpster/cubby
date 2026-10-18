@@ -114,4 +114,9 @@ run "iam_principals_carry_the_deploy_boundary" {
     condition     = aws_iam_user.backup.permissions_boundary == "arn:aws:iam::189923011121:policy/terraform-deploy-boundary"
     error_message = "every aws_iam_user must set the terraform-deploy-boundary permissions boundary"
   }
+
+  assert {
+    condition     = aws_iam_user.backup.tags["terraform-deploy-boundary"] == "true"
+    error_message = "every aws_iam_user must be tagged terraform-deploy-boundary=true so its access key can be created"
+  }
 }
