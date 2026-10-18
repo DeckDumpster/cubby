@@ -653,3 +653,60 @@ async fn bootstrap_creates_a_family_only_into_an_empty_registry() {
     assert!(!cubby_server::family_cli::bootstrap(&data, "other@example.com").unwrap());
     assert_eq!(Registry::open(&data).unwrap().list().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn a_paired_device_browses_home_search_and_next_over_http() {
+    let e = env().await;
+    seed(&e);
+    let conn = e.family();
+    conn.execute_batch(
+        "INSERT INTO videos(youtube_id,title,duration_s) VALUES ('v1','Blue train',600),('v2','Red train',300),('v3','Hidden train',300);
+         INSERT INTO videos_fts(rowid,title,channel_title,tags) SELECT rowid,title,channel_title,tags FROM videos;
+         INSERT INTO allow_policies(id,kind,youtube_id,added_at) VALUES ('p1','video','v1',0),('p2','video','v2',0);
+         INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES ('v1',NULL,'p1','approved',0),('v2',NULL,'p2','approved',0);
+         INSERT INTO budgets(child_id,video_equivalents,window_s,cutoff_mid_play) VALUES ('c1',2,86400,0);",
+    )
+    .unwrap();
+    let code = ident::new_pairing_code(&conn, "c1", now())
+        .unwrap()
+        .unwrap();
+    let token = ident::redeem_pairing_code(&conn, &e.family_id, &code.code, None, now())
+        .unwrap()
+        .token;
+    let get = |path: &'static str, token: Option<String>| {
+        let e = &e;
+        async move {
+            let mut r = Request::get(path);
+            if let Some(t) = token {
+                r = r.header("authorization", format!("Bearer {t}"));
+            }
+            e.call(r.body(Body::empty()).unwrap()).await
+        }
+    };
+    for p in [
+        "/api/child/home",
+        "/api/child/search?q=train",
+        "/api/child/next?after=v1",
+    ] {
+        assert_eq!(get(p, None).await.0, StatusCode::UNAUTHORIZED, "{p}");
+    }
+    let (s, v) = get("/api/child/home", Some(token.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["remaining"]["videos"], 2.0);
+    let all = v["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["key"] == "all")
+        .unwrap()["tiles"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(all, 2);
+    let (s, v) = get("/api/child/search?q=train", Some(token.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["tiles"].as_array().unwrap().len(), 2);
+    let (s, v) = get("/api/child/next?after=v1", Some(token)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["tiles"][0]["youtube_id"], "v2");
+}

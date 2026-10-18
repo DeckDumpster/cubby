@@ -7,12 +7,17 @@ use std::sync::{Arc, Mutex};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use cubby_core::rank::{ChildCtx, Ranker, V1Ranker, VideoMeta, rank_checked};
 use cubby_db::browse::{self, History, VideoRow};
+use cubby_db::identity::Device;
 use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+use crate::AppState;
+use crate::error::ApiError;
+use crate::identity::{ParentOf, open_own};
 
 pub const NEXT_TILES: usize = 12;
 const HOME_ROW: usize = 12;
@@ -86,7 +91,7 @@ fn ctx(h: &History, now: i64) -> ChildCtx {
 
 /// Ranker order over `rows`, resolved back to rows, at most `limit` of them.
 fn ranked<'a>(
-    api: &ChildApi,
+    ranker: &dyn Ranker,
     child: &ChildCtx,
     current: Option<&VideoRow>,
     rows: &'a [VideoRow],
@@ -95,7 +100,7 @@ fn ranked<'a>(
     let metas: Vec<VideoMeta> = rows.iter().map(meta).collect();
     let by_id: HashMap<&str, &VideoRow> = rows.iter().map(|r| (r.youtube_id.as_str(), r)).collect();
     let cur = current.map(meta);
-    rank_checked(api.ranker.as_ref(), child, cur.as_ref(), &metas)
+    rank_checked(ranker, child, cur.as_ref(), &metas)
         .iter()
         .filter_map(|id| by_id.get(id.as_str()).copied())
         .take(limit)
@@ -111,9 +116,25 @@ fn db_err(_: rusqlite::Error) -> StatusCode {
 }
 
 pub fn home_json(api: &ChildApi, conn: &Connection, child_id: &str) -> rusqlite::Result<Value> {
+    home_with(
+        api.ranker.as_ref(),
+        (api.now)(),
+        (api.budget)(conn, child_id),
+        conn,
+        child_id,
+    )
+}
+
+fn home_with(
+    ranker: &dyn Ranker,
+    now: i64,
+    remaining: Value,
+    conn: &Connection,
+    child_id: &str,
+) -> rusqlite::Result<Value> {
     let rows = browse::playable_videos(conn, child_id)?;
     let h = browse::history(conn, child_id)?;
-    let c = ctx(&h, (api.now)());
+    let c = ctx(&h, now);
     let by_id: HashMap<&str, &VideoRow> = rows.iter().map(|r| (r.youtube_id.as_str(), r)).collect();
 
     let cont: Vec<Value> = h
@@ -138,12 +159,12 @@ pub fn home_json(api: &ChildApi, conn: &Connection, child_id: &str) -> rusqlite:
             .then_with(|| a.youtube_id.cmp(&b.youtube_id))
     });
     Ok(json!({
-        "remaining": (api.budget)(conn, child_id),
+        "remaining": remaining,
         "sections": [
             {"key": "continue", "tiles": cont},
-            {"key": "liked_channels", "tiles": ranked(api, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
+            {"key": "liked_channels", "tiles": ranked(ranker, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
             {"key": "new", "tiles": newest.iter().take(HOME_ROW).map(|v| tile(v)).collect::<Vec<_>>()},
-            {"key": "all", "tiles": ranked(api, &c, None, &rows, HOME_ALL).iter().map(|v| tile(v)).collect::<Vec<_>>()},
+            {"key": "all", "tiles": ranked(ranker, &c, None, &rows, HOME_ALL).iter().map(|v| tile(v)).collect::<Vec<_>>()},
         ],
     }))
 }
@@ -154,9 +175,27 @@ pub fn next_json(
     child_id: &str,
     after: &str,
 ) -> rusqlite::Result<Value> {
+    next_with(
+        api.ranker.as_ref(),
+        (api.now)(),
+        (api.budget)(conn, child_id),
+        conn,
+        child_id,
+        after,
+    )
+}
+
+fn next_with(
+    ranker: &dyn Ranker,
+    now: i64,
+    remaining: Value,
+    conn: &Connection,
+    child_id: &str,
+    after: &str,
+) -> rusqlite::Result<Value> {
     let rows = browse::playable_videos(conn, child_id)?;
     let h = browse::history(conn, child_id)?;
-    let c = ctx(&h, (api.now)());
+    let c = ctx(&h, now);
     let current = rows.iter().find(|r| r.youtube_id == after);
     // The current video is not a candidate, whatever the ranker would do with it.
     let others: Vec<VideoRow> = rows
@@ -164,11 +203,11 @@ pub fn next_json(
         .filter(|r| r.youtube_id != after)
         .cloned()
         .collect();
-    let tiles: Vec<Value> = ranked(api, &c, current, &others, NEXT_TILES)
+    let tiles: Vec<Value> = ranked(ranker, &c, current, &others, NEXT_TILES)
         .iter()
         .map(|v| tile(v))
         .collect();
-    Ok(json!({"tiles": tiles, "remaining": (api.budget)(conn, child_id)}))
+    Ok(json!({"tiles": tiles, "remaining": remaining}))
 }
 
 async fn home(State(api): State<ChildApi>, headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
@@ -213,4 +252,58 @@ async fn next(
     next_json(&api, &conn, &child, &p.after)
         .map(Json)
         .map_err(db_err)
+}
+
+/// The same three reads, mounted in the real app behind the device guard: the child is the
+/// device's own and the database is its family's, so no call can name another.
+pub(crate) fn routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/child/home", get(home_route))
+        .route("/api/child/search", get(search_route))
+        .route("/api/child/next", get(next_route))
+}
+
+fn internal(e: impl std::fmt::Display) -> ApiError {
+    ApiError::internal(e)
+}
+
+async fn home_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+) -> Result<Json<Value>, ApiError> {
+    let conn = open_own(&state, &family_id)?;
+    let now = crate::play::unix_now();
+    let remaining = crate::play::remaining_json_for(&conn, &dev.child_id, now).map_err(internal)?;
+    home_with(&V1Ranker, now, remaining, &conn, &dev.child_id)
+        .map(Json)
+        .map_err(internal)
+}
+
+async fn search_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Query(p): Query<SearchParams>,
+) -> Result<Json<Value>, ApiError> {
+    let conn = open_own(&state, &family_id)?;
+    let found = browse::search(&conn, &dev.child_id, &p.q, SEARCH_LIMIT).map_err(internal)?;
+    Ok(Json(json!({
+        "q": p.q,
+        "tiles": found.iter().map(tile).collect::<Vec<_>>(),
+    })))
+}
+
+async fn next_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Query(p): Query<NextParams>,
+) -> Result<Json<Value>, ApiError> {
+    let conn = open_own(&state, &family_id)?;
+    let now = crate::play::unix_now();
+    let remaining = crate::play::remaining_json_for(&conn, &dev.child_id, now).map_err(internal)?;
+    next_with(&V1Ranker, now, remaining, &conn, &dev.child_id, &p.after)
+        .map(Json)
+        .map_err(internal)
 }

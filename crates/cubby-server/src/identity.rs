@@ -32,6 +32,7 @@ pub(crate) fn routes(state: Arc<AppState>) -> Router {
     let child = Router::new()
         .route("/api/child/me", get(me))
         .merge(crate::play::routes())
+        .merge(crate::child::routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), device_guard));
     Router::new()
         .route("/api/child/pair", post(pair))
