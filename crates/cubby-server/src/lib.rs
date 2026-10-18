@@ -145,8 +145,14 @@ pub fn app(config: &Config) -> Result<Router, String> {
     Ok(Router::new()
         .route("/healthz", get(healthz))
         .merge(identity::routes(state))
+        .route("/api/{*rest}", axum::routing::any(api_not_found))
         .fallback_service(spa)
         .layer(middleware::from_fn_with_state(sink, record_latency)))
+}
+
+/// An unmounted `/api/*` path is a JSON 404, never the SPA shell with a 200.
+async fn api_not_found() -> impl IntoResponse {
+    (StatusCode::NOT_FOUND, Json(json!({"error": "not found"})))
 }
 
 async fn healthz() -> impl IntoResponse {
