@@ -113,7 +113,7 @@ test.describe('hermetic stack', () => {
 			await child.getByLabel('search').fill('volcano');
 			await child.getByRole('button', { name: 'Search' }).click();
 			await expect(child.getByRole('heading', { name: 'Videos about volcano' })).toBeVisible();
-			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title })).toBeVisible();
+			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
 			await child.getByLabel('search').fill('slime');
 			await child.getByRole('button', { name: 'Search' }).click();
 			await expect(child.getByText('Nothing found.')).toBeVisible();
@@ -123,7 +123,7 @@ test.describe('hermetic stack', () => {
 
 		await test.step('playback starts: a play grant is created', async () => {
 			const play = child.waitForResponse((r) => r.url().endsWith('/api/child/play'));
-			await child.getByRole('button', { name: VIDEOS[VOLCANO].title }).click();
+			await child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first().click();
 			const res = await play;
 			expect(res.status()).toBe(200);
 			expect((await res.json()).grant_id, 'no play grant was created').toBeTruthy();
