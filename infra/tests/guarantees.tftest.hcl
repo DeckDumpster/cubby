@@ -12,6 +12,8 @@ variables {
   deploy_role_arn       = "arn:aws:iam::123456789012:role/terraform-deploy"
   cloudflare_account_id = "acct"
   cloudflare_zone_id    = "zone"
+
+  pocket_id_login_method_id = "11111111-2222-3333-4444-555555555555"
 }
 
 override_resource {
@@ -92,12 +94,16 @@ run "access_allows_only_the_parents" {
   command = plan
 
   assert {
-    condition     = cloudflare_zero_trust_access_policy.parent.decision == "allow" && length(var.parent_emails) > 0 && toset([for i in cloudflare_zero_trust_access_policy.parent.include : i.email.email]) == toset(var.parent_emails) && length(cloudflare_zero_trust_access_policy.parent.include) == length(var.parent_emails)
-    error_message = "parent policy must allow exactly the emails in var.parent_emails"
+    condition     = cloudflare_zero_trust_access_policy.parent.decision == "allow" && length(cloudflare_zero_trust_access_policy.parent.include) == 1 && length(cloudflare_zero_trust_access_policy.parent.exclude) == 0 && length(cloudflare_zero_trust_access_policy.parent.require) == 0 && cloudflare_zero_trust_access_policy.parent.include[0].oidc.claim_name == "groups" && cloudflare_zero_trust_access_policy.parent.include[0].oidc.claim_value == "cubby-parents" && cloudflare_zero_trust_access_policy.parent.include[0].oidc.identity_provider_id == var.pocket_id_login_method_id
+    error_message = "parent policy must be one allow rule: OIDC groups contains cubby-parents"
   }
   assert {
-    condition     = toset(var.parent_emails) == toset(["ryan@gantt.pub", "kim.parent@example.test"])
-    error_message = "the parents are Ryan and Kim"
+    condition     = toset(cloudflare_zero_trust_access_application.parent.allowed_idps) == toset([var.pocket_id_login_method_id]) && length(cloudflare_zero_trust_access_application.parent.allowed_idps) == 1
+    error_message = "parent app allows exactly one login method, Pocket ID"
+  }
+  assert {
+    condition     = cloudflare_zero_trust_access_application.parent.auto_redirect_to_identity == true
+    error_message = "parent app must use instant auth"
   }
   assert {
     condition     = cloudflare_zero_trust_access_policy.device_bypass.decision == "bypass"

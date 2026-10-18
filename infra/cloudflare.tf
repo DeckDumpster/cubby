@@ -36,7 +36,15 @@ resource "cloudflare_zero_trust_access_policy" "parent" {
   decision         = "allow"
   session_duration = var.session_duration
 
-  include = [for e in var.parent_emails : { email = { email = e } }]
+  include = [
+    {
+      oidc = {
+        claim_name           = "groups"
+        claim_value          = "cubby-parents"
+        identity_provider_id = var.pocket_id_login_method_id
+      }
+    },
+  ]
 }
 
 resource "cloudflare_zero_trust_access_policy" "device_bypass" {
@@ -54,6 +62,9 @@ resource "cloudflare_zero_trust_access_application" "parent" {
   name             = "cubby-parent"
   type             = "self_hosted"
   session_duration = var.session_duration
+
+  allowed_idps              = [var.pocket_id_login_method_id]
+  auto_redirect_to_identity = true
 
   destinations = [
     { type = "public", uri = "${var.hostname}/parent" },
