@@ -337,6 +337,7 @@
 		</form>
 	{:else}
 		<header>
+			{#if child.name}<span class="hello" data-testid="greeting"><span class="me">{child.avatar}</span> Hi, {child.name}!</span>{/if}
 			{#if view !== 'grid'}<button class="back" onclick={back}>← Back</button>{/if}
 			{#if badgeInfo}
 				<div class="badge" data-testid="badge">
@@ -435,6 +436,8 @@
 
 <style>
 	main { max-width: 72rem; margin: 0 auto; padding: 1rem; font-family: system-ui, sans-serif; font-size: 1.25rem; }
+	.hello { font-size: 1.2rem; font-weight: 600; }
+	.me { font-size: 1.5rem; }
 	header { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; }
 	.badge { display: flex; flex-direction: column; gap: 0.25rem; margin-left: auto; font-weight: 600; }
 	.meter { display: block; width: 14rem; height: 0.75rem; background: #ddd; border-radius: 1rem; overflow: hidden; }

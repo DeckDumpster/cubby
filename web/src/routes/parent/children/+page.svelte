@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getParent } from '$lib/parentState.svelte.js';
+	import { getParent, AVATARS } from '$lib/parentState.svelte.js';
 	const ps = getParent();
 </script>
 
@@ -8,6 +8,11 @@
 	{#each ps.children as c (c.id)}
 		<div class="card">
 			<h3><span class="avatar">{c.avatar}</span> {c.name} <small>{c.tz}</small></h3>
+			<div class="picker" role="group" aria-label="Picture for {c.name}">
+				{#each AVATARS as e (e)}
+					<button type="button" aria-label={e} aria-pressed={c.avatar === e} onclick={() => ps.setAvatar(c, e)}>{e}</button>
+				{/each}
+			</div>
 			{#if ps.forms[c.id]}
 				<label>Videos per day <input bind:value={ps.forms[c.id].videos} /></label>
 				<label>Minutes per day <input bind:value={ps.forms[c.id].minutes} /></label>
@@ -33,8 +38,20 @@
 	<div class="card">
 		<h3>Add a child</h3>
 		<input placeholder="Name" bind:value={ps.newChild.name} />
-		<input placeholder="Avatar" bind:value={ps.newChild.avatar} />
+		<div class="picker" role="group" aria-label="Picture (shown on her screen)">
+			<small>Picture (shown on her screen)</small>
+			{#each AVATARS as e (e)}
+				<button type="button" aria-label={e} aria-pressed={ps.newChild.avatar === e} onclick={() => (ps.newChild.avatar = e)}>{e}</button>
+			{/each}
+		</div>
 		<input placeholder="Time zone" bind:value={ps.newChild.tz} />
 		<button class="primary" onclick={ps.addChild} disabled={!ps.newChild.name}>Add</button>
 	</div>
 </section>
+
+<style>
+	.picker { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.5rem 0; align-items: center; }
+	.picker small { flex-basis: 100%; }
+	.picker button { font-size: 1.4rem; min-width: var(--touch); padding: 0; }
+	.picker button[aria-pressed='true'] { outline: 3px solid var(--accent); }
+</style>

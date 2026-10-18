@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const tile = (id, title) => ({ youtube_id: id, title, channel_title: 'Chan', thumb: `/thumbs/${id}.jpg` });
 const HOME = {
-	child: { name: 'Kid' },
+	child: { name: 'Kid', avatar: '🦄' },
 	remaining: { videos: 3, minutes: null },
 	total_videos: 5,
 	sections: [{ key: 'all', title: 'All videos', tiles: [tile('v1', 'First video'), tile('v2', 'Second video')] }]
@@ -80,6 +80,7 @@ const offOrigin = (page) =>
 test('the grid shows the budget badge and has no off-origin link anywhere in the flow', async ({ page }) => {
 	await setup(page);
 	await page.goto('/watch');
+	await expect(page.getByTestId('greeting')).toContainText('🦄');
 	await expect(page.getByTestId('badge')).toContainText('3 videos left today');
 	await expect(page.getByRole('button', { name: /First video/ })).toBeVisible();
 	expect(await offOrigin(page)).toEqual([]);

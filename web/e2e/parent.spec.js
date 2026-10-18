@@ -132,3 +132,31 @@ test('the History child lives in the URL and survives a reload', async ({ page }
 	await expect(page.getByRole('combobox')).toHaveValue('c2');
 	expect(asked.at(-1)).toContain('/children/c2/history');
 });
+
+test('the child picture is picked from emoji when adding and editable from the card', async ({ page }) => {
+	const kids = structuredClone(CHILDREN);
+	const sent = [];
+	await page.route('**/api/parent/**', async (route) => {
+		const req = route.request();
+		const u = req.url();
+		if (req.method() !== 'GET' && u.includes('/children')) {
+			sent.push({ method: req.method(), url: u, body: req.postDataJSON() });
+			const b = req.postDataJSON();
+			if (req.method() === 'POST') kids.push({ id: 'c3', devices: [], budget: CHILDREN[1].budget, ...b });
+			else Object.assign(kids.find((k) => u.endsWith('/' + k.id)), b);
+			return route.fulfill({ json: { ok: true, id: 'c3' } });
+		}
+		return route.fulfill({ json: u.includes('/children') ? kids : u.includes('/policies') ? POLICIES : [] });
+	});
+	await page.goto('/parent/children');
+	await expect(page.getByRole('group', { name: 'Picture (shown on her screen)' })).toBeVisible();
+	await page.getByPlaceholder('Name').fill('Lily');
+	await page.getByRole('group', { name: 'Picture (shown on her screen)' }).getByRole('button', { name: '🦄' }).click();
+	await page.getByRole('button', { name: 'Add', exact: true }).click();
+	const card = page.locator('.card', { hasText: 'Lily' }).first();
+	await expect(card.locator('.avatar')).toHaveText('🦄');
+	expect(sent[0].body.avatar).toBe('🦄');
+	await card.getByRole('button', { name: '🚀' }).click();
+	await expect(card.locator('.avatar')).toHaveText('🚀');
+	expect(sent[1].method).toBe('PUT');
+});
