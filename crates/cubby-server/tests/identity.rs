@@ -1,4 +1,4 @@
-//! Identity over HTTP: Access JWT verification, device pairing, tokens and revocation.
+//! Identity over HTTP: OIDC session guard, device pairing, tokens and revocation.
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -10,23 +10,21 @@ use cubby_db::Registry;
 use cubby_db::identity as ident;
 use cubby_server::{Config, app};
 use http_body_util::BodyExt;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-const GOOD_PEM: &str = include_str!("fixtures/good.pem");
-const OTHER_PEM: &str = include_str!("fixtures/other.pem");
-const GOOD_N: &str = include_str!("fixtures/good.n");
-const KID: &str = "test-key";
-const ISS: &str = "https://fam.cloudflareaccess.com";
-const AUD: &str = "aud-tag";
+mod support;
+use support::Provider;
+
 const PARENT: &str = "mum@example.com";
 
 struct Env {
     router: axum::Router,
     dir: PathBuf,
     family_id: String,
+    provider: Provider,
+    parent_cookie: std::sync::Mutex<Option<String>>,
 }
 
 fn now() -> i64 {
@@ -49,40 +47,18 @@ fn temp_dir() -> PathBuf {
     d
 }
 
-async fn jwks_server() -> String {
-    let jwks = json!({"keys": [{"kty": "RSA", "kid": KID, "alg": "RS256", "use": "sig",
-        "n": GOOD_N.trim(), "e": "AQAB"}]});
-    let router = axum::Router::new().route(
-        "/jwks",
-        axum::routing::get(move || {
-            let j = jwks.clone();
-            async move { axum::Json(j) }
-        }),
-    );
-    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/jwks", l.local_addr().unwrap());
-    tokio::spawn(async move { axum::serve(l, router).await.unwrap() });
-    url
-}
-
 async fn env_with(access: bool, otlp: &str) -> Env {
     env_build(access, otlp, true).await
 }
 
 async fn env_build(access: bool, otlp: &str, provision: bool) -> Env {
     let dir = temp_dir();
-    let jwks = if access {
-        jwks_server().await
-    } else {
-        String::new()
-    };
+    let provider = Provider::start().await;
     let cfg = Config::from_lookup(|k| match k {
         "CUBBY_WEB_DIR" => Some(dir.display().to_string()),
         "CUBBY_DATA_DIR" => Some(dir.join("data").display().to_string()),
         "CUBBY_OTLP_ENDPOINT" => Some(otlp.into()),
-        "CUBBY_ACCESS_TEAM_DOMAIN" if access => Some(ISS.into()),
-        "CUBBY_ACCESS_AUD" if access => Some(AUD.into()),
-        "CUBBY_ACCESS_JWKS_URL" if access => Some(jwks.clone()),
+        k if access => provider.env(k),
         _ => None,
     })
     .unwrap();
@@ -99,6 +75,8 @@ async fn env_build(access: bool, otlp: &str, provision: bool) -> Env {
         router,
         dir,
         family_id,
+        provider,
+        parent_cookie: Default::default(),
     }
 }
 
@@ -114,6 +92,23 @@ impl Env {
             .unwrap()
     }
 
+    /// Signs `email` in through the fake provider and returns the session cookie.
+    async fn cookie(&self, email: &str) -> String {
+        support::session_cookie(&self.router, &self.provider, email).await
+    }
+
+    async fn parent_session(&self) -> String {
+        let cached = self.parent_cookie.lock().unwrap().clone();
+        match cached {
+            Some(c) => c,
+            None => {
+                let c = self.cookie(PARENT).await;
+                *self.parent_cookie.lock().unwrap() = Some(c.clone());
+                c
+            }
+        }
+    }
+
     async fn call(&self, req: Request<Body>) -> (StatusCode, Value) {
         let res = self.router.clone().oneshot(req).await.unwrap();
         let status = res.status();
@@ -124,7 +119,7 @@ impl Env {
     async fn parent_post(&self, path: &str, jwt: Option<&str>) -> (StatusCode, Value) {
         let mut r = Request::post(path);
         if let Some(j) = jwt {
-            r = r.header("cf-access-jwt-assertion", j);
+            r = r.header("cookie", j);
         }
         self.call(r.body(Body::empty()).unwrap()).await
     }
@@ -149,29 +144,6 @@ impl Env {
     }
 }
 
-fn claims(email: &str, aud: &str, iss: &str, exp: i64, nbf: i64) -> Value {
-    json!({"email": email, "sub": "sub-1", "aud": aud, "iss": iss, "exp": exp, "nbf": nbf})
-}
-
-fn sign(pem: &str, alg: Algorithm, kid: Option<&str>, claims: &Value) -> String {
-    let mut h = Header::new(alg);
-    h.kid = kid.map(str::to_string);
-    let key = match alg {
-        Algorithm::RS256 => EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
-        _ => EncodingKey::from_secret(b"secret"),
-    };
-    jsonwebtoken::encode(&h, claims, &key).unwrap()
-}
-
-fn good_jwt(email: &str) -> String {
-    sign(
-        GOOD_PEM,
-        Algorithm::RS256,
-        Some(KID),
-        &claims(email, AUD, ISS, now() + 300, now() - 10),
-    )
-}
-
 const PAIRING: &str = "/api/parent/children/c1/pairing";
 
 fn seed(e: &Env) {
@@ -179,161 +151,40 @@ fn seed(e: &Env) {
 }
 
 #[tokio::test]
-async fn a_valid_access_jwt_from_a_parent_is_accepted() {
+async fn a_signed_in_parent_is_accepted() {
     let e = env().await;
     seed(&e);
-    let (s, body) = e.parent_post(PAIRING, Some(&good_jwt(PARENT))).await;
+    let (s, body) = e
+        .parent_post(PAIRING, Some(&e.parent_session().await))
+        .await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["code"].as_str().unwrap().len(), 6);
     assert!(body["expires_at"].as_i64().unwrap() > now());
 }
 
 #[tokio::test]
-async fn the_access_cookie_is_accepted_like_the_header() {
-    let e = env().await;
-    seed(&e);
-    let r = Request::post(PAIRING)
-        .header(
-            "cookie",
-            format!("a=b; CF_Authorization={}", good_jwt(PARENT)),
-        )
-        .body(Body::empty())
-        .unwrap();
-    assert_eq!(e.call(r).await.0, StatusCode::OK);
-}
-
-#[tokio::test]
-async fn a_forged_or_invalid_jwt_is_refused() {
-    let e = env().await;
-    seed(&e);
-    let ok =
-        |email: &str, aud: &str, iss: &str, exp: i64, nbf: i64| claims(email, aud, iss, exp, nbf);
-    let (t, past) = (now() + 300, now() - 10);
-    let cases: Vec<(&str, Option<String>)> = vec![
-        ("missing", None),
-        ("garbage", Some("not.a.jwt".into())),
-        (
-            "signed by another key",
-            Some(sign(
-                OTHER_PEM,
-                Algorithm::RS256,
-                Some(KID),
-                &ok(PARENT, AUD, ISS, t, past),
-            )),
-        ),
-        (
-            "expired",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                Some(KID),
-                &ok(PARENT, AUD, ISS, now() - 3600, past - 7200),
-            )),
-        ),
-        (
-            "not yet valid",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                Some(KID),
-                &ok(PARENT, AUD, ISS, t + 3600, now() + 1800),
-            )),
-        ),
-        (
-            "wrong audience",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                Some(KID),
-                &ok(PARENT, "other", ISS, t, past),
-            )),
-        ),
-        (
-            "wrong issuer",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                Some(KID),
-                &ok(PARENT, AUD, "https://evil.example", t, past),
-            )),
-        ),
-        (
-            "unknown kid",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                Some("nope"),
-                &ok(PARENT, AUD, ISS, t, past),
-            )),
-        ),
-        (
-            "no kid",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                None,
-                &ok(PARENT, AUD, ISS, t, past),
-            )),
-        ),
-        (
-            "HS256",
-            Some(sign(
-                "",
-                Algorithm::HS256,
-                Some(KID),
-                &ok(PARENT, AUD, ISS, t, past),
-            )),
-        ),
-        (
-            "no audience or issuer",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                Some(KID),
-                &json!({"email": PARENT, "sub": "s", "exp": t}),
-            )),
-        ),
-        (
-            "empty email",
-            Some(sign(
-                GOOD_PEM,
-                Algorithm::RS256,
-                Some(KID),
-                &ok("", AUD, ISS, t, past),
-            )),
-        ),
-    ];
-    for (name, jwt) in cases {
-        let (s, _) = e.parent_post(PAIRING, jwt.as_deref()).await;
-        assert_eq!(s, StatusCode::UNAUTHORIZED, "{name}");
-    }
-}
-
-#[tokio::test]
 async fn a_verified_stranger_is_forbidden() {
     let e = env().await;
     seed(&e);
+    let o = support::sign_in(&e.router, &e.provider, "stranger@example.com").await;
+    assert_eq!(o.status, StatusCode::FORBIDDEN);
     let (s, _) = e
-        .parent_post(PAIRING, Some(&good_jwt("stranger@example.com")))
-        .await;
-    assert_eq!(s, StatusCode::FORBIDDEN);
-    let (s, _) = e
-        .parent_post(PAIRING, Some(&good_jwt("MUM@Example.com")))
+        .parent_post(PAIRING, Some(&e.cookie("MUM@Example.com").await))
         .await;
     assert_eq!(s, StatusCode::OK, "email match ignores case");
 }
 
 #[tokio::test]
-async fn parent_routes_are_closed_when_access_is_not_configured() {
+async fn parent_routes_are_closed_when_oidc_is_not_configured() {
     let e = env_with(false, "").await;
     seed(&e);
-    let (s, _) = e.parent_post(PAIRING, Some(&good_jwt(PARENT))).await;
+    let (s, _) = e.parent_post(PAIRING, Some("cubby_session=anything")).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn a_partial_access_configuration_is_refused_at_startup() {
-    let r = Config::from_lookup(|k| (k == "CUBBY_ACCESS_AUD").then(|| "x".into()));
+async fn a_partial_oidc_configuration_is_refused_at_startup() {
+    let r = Config::from_lookup(|k| (k == "CUBBY_OIDC_CLIENT_ID").then(|| "x".into()));
     assert!(r.is_err());
 }
 
@@ -343,7 +194,7 @@ async fn pairing_an_unknown_child_is_not_found() {
     let (s, _) = e
         .parent_post(
             "/api/parent/children/ghost/pairing",
-            Some(&good_jwt(PARENT)),
+            Some(&e.parent_session().await),
         )
         .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
@@ -353,7 +204,7 @@ async fn pairing_an_unknown_child_is_not_found() {
 async fn a_paired_device_is_revoked_and_gets_401_at_once() {
     let e = env().await;
     seed(&e);
-    let jwt = good_jwt(PARENT);
+    let jwt = e.parent_session().await;
     let (_, code) = e.parent_post(PAIRING, Some(&jwt)).await;
     let (s, paired) = e.pair(code["code"].as_str().unwrap(), "1.1.1.1").await;
     assert_eq!(s, StatusCode::OK, "{paired}");
@@ -399,7 +250,9 @@ async fn child_calls_without_a_valid_bearer_token_get_401() {
 async fn a_pairing_code_is_single_use_over_http() {
     let e = env().await;
     seed(&e);
-    let (_, code) = e.parent_post(PAIRING, Some(&good_jwt(PARENT))).await;
+    let (_, code) = e
+        .parent_post(PAIRING, Some(&e.parent_session().await))
+        .await;
     let code = code["code"].as_str().unwrap();
     assert_eq!(e.pair(code, "2.2.2.2").await.0, StatusCode::OK);
     assert_eq!(e.pair(code, "2.2.2.2").await.0, StatusCode::BAD_REQUEST);
@@ -429,7 +282,9 @@ async fn pairing_is_rate_limited_to_five_attempts_a_minute_per_ip() {
     }
     let (s, _) = e.pair("ZZZZZZ", "4.4.4.4").await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
-    let (_, code) = e.parent_post(PAIRING, Some(&good_jwt(PARENT))).await;
+    let (_, code) = e
+        .parent_post(PAIRING, Some(&e.parent_session().await))
+        .await;
     let (s, _) = e.pair(code["code"].as_str().unwrap(), "4.4.4.4").await;
     assert_eq!(
         s,
@@ -609,9 +464,9 @@ async fn play_beat_and_http_telemetry_reach_the_otlp_sink() {
 async fn the_family_cli_creates_a_family_an_access_request_is_then_accepted_for() {
     let e = env_build(true, "", false).await;
     let data = e.dir.join("data");
-    let jwt = good_jwt(PARENT);
-    let (s, _) = e.parent_post(PAIRING, Some(&jwt)).await;
-    assert_eq!(s, StatusCode::FORBIDDEN, "no family yet");
+    let refused = support::sign_in(&e.router, &e.provider, PARENT).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN, "no family yet");
+    assert!(refused.cookie.is_none());
 
     let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let mut out = Vec::new();
@@ -631,6 +486,7 @@ async fn the_family_cli_creates_a_family_an_access_request_is_then_accepted_for(
         "Europe/London",
     )
     .unwrap();
+    let jwt = e.parent_session().await;
     let (s, body) = e.parent_post(PAIRING, Some(&jwt)).await;
     assert_eq!(s, StatusCode::OK, "{body}");
 
@@ -650,7 +506,7 @@ async fn the_family_cli_creates_a_family_an_access_request_is_then_accepted_for(
         format!("{}\tkim@gmail.com\n", fam.id)
     );
     let (s, _) = e
-        .parent_post(PAIRING, Some(&good_jwt("kim@gmail.com")))
+        .parent_post(PAIRING, Some(&e.cookie("kim@gmail.com").await))
         .await;
     assert_eq!(s, StatusCode::OK, "a co-parent reaches the same family");
     let mut out = Vec::new();

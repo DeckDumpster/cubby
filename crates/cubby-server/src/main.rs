@@ -32,7 +32,7 @@ async fn main() {
             }
         }
     }
-    if let Err(e) = cubby_server::check_access(&config).await {
+    if let Err(e) = cubby_server::check_oidc(&config).await {
         eprintln!("cubby-server: {e}");
         std::process::exit(1);
     }

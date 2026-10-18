@@ -1,10 +1,10 @@
-//! The axum server: /healthz, identity (Access JWT for parents, bearer tokens for paired child
+//! The axum server: /healthz, identity (OIDC session for parents, bearer tokens for paired child
 //! devices), the built SPA shell, and request-latency telemetry.
 
-pub mod access;
 mod error;
 pub mod family_cli;
 mod identity;
+pub mod oidc;
 mod parent;
 pub mod play;
 mod ratelimit;
@@ -25,7 +25,7 @@ use cubby_otel::MetricsSink;
 use serde_json::json;
 use tower_http::services::{ServeDir, ServeFile};
 
-pub use access::AccessConfig;
+pub use oidc::OidcConfig;
 
 pub const DEFAULT_PORT: u16 = 8790;
 
@@ -38,17 +38,19 @@ pub struct Config {
     pub otlp_endpoint: String,
     /// Directory holding the family database.
     pub data_dir: PathBuf,
-    /// Cloudflare Access settings; without them every parent route refuses.
-    pub access: Option<AccessConfig>,
+    /// Pocket ID sign-in settings; without them every parent route refuses.
+    pub oidc: Option<OidcConfig>,
     /// YouTube Data API key; with it, allowing a link ingests its metadata before the request
     /// returns. Empty leaves that to the worker's timer.
     pub yt_api_key: String,
 }
 
 impl Config {
-    /// Reads `CUBBY_BIND` (127.0.0.1), `CUBBY_PORT` (8790), `CUBBY_WEB_DIR` (web/build) and
-    /// `CUBBY_OTLP_ENDPOINT` (empty), `CUBBY_DATA_DIR` (data) and `CUBBY_ACCESS_TEAM_DOMAIN` / `CUBBY_ACCESS_AUD` / `CUBBY_ACCESS_JWKS_URL`,
-    /// which are set together or not at all.
+    /// Reads `CUBBY_BIND` (127.0.0.1), `CUBBY_PORT` (8790), `CUBBY_WEB_DIR` (web/build),
+    /// `CUBBY_OTLP_ENDPOINT` (empty), `CUBBY_DATA_DIR` (data), `CUBBY_OIDC_ISSUER` /
+    /// `CUBBY_OIDC_CLIENT_ID` / `CUBBY_OIDC_CLIENT_SECRET` / `CUBBY_OIDC_BASE_URL`, which are set
+    /// together or not at all, `CUBBY_OIDC_GROUP` (cubby-parents) and `CUBBY_SESSION_TTL_SECS`
+    /// (28800).
     pub fn from_env() -> Result<Config, String> {
         Config::from_lookup(|k| std::env::var(k).ok())
     }
@@ -62,33 +64,50 @@ impl Config {
             None => DEFAULT_PORT,
         };
         let var = |k: &str| get(k).filter(|v| !v.trim().is_empty());
-        let access_vars = [
-            "CUBBY_ACCESS_TEAM_DOMAIN",
-            "CUBBY_ACCESS_AUD",
-            "CUBBY_ACCESS_JWKS_URL",
+        let oidc_vars = [
+            "CUBBY_OIDC_ISSUER",
+            "CUBBY_OIDC_CLIENT_ID",
+            "CUBBY_OIDC_CLIENT_SECRET",
+            "CUBBY_OIDC_BASE_URL",
         ];
-        let access = match access_vars.map(var) {
-            [None, None, None] => None,
-            [Some(team_domain), Some(aud), Some(jwks_url)] => Some(AccessConfig {
-                team_domain,
-                aud,
-                jwks_url,
+        let session_ttl = match var("CUBBY_SESSION_TTL_SECS") {
+            Some(t) => std::time::Duration::from_secs(
+                t.trim()
+                    .parse()
+                    .map_err(|_| format!("CUBBY_SESSION_TTL_SECS {t:?} is not a number"))?,
+            ),
+            None => oidc::DEFAULT_SESSION_TTL,
+        };
+        let oidc = match oidc_vars.map(var) {
+            [None, None, None, None] => None,
+            [
+                Some(issuer),
+                Some(client_id),
+                Some(client_secret),
+                Some(base_url),
+            ] => Some(OidcConfig {
+                issuer,
+                client_id,
+                client_secret,
+                base_url,
+                group: var("CUBBY_OIDC_GROUP").unwrap_or_else(|| oidc::DEFAULT_GROUP.into()),
+                session_ttl,
             }),
             vals => {
-                let missing: Vec<_> = access_vars
+                let missing: Vec<_> = oidc_vars
                     .iter()
                     .zip(&vals)
                     .filter(|(_, v)| v.is_none())
                     .map(|(n, _)| *n)
                     .collect();
                 return Err(format!(
-                    "Cloudflare Access is partly configured; also set {}",
+                    "OIDC sign-in is partly configured; also set {}",
                     missing.join(", ")
                 ));
             }
         };
         Ok(Config {
-            access,
+            oidc,
             yt_api_key: get("CUBBY_YT_API_KEY")
                 .unwrap_or_default()
                 .trim()
@@ -109,7 +128,7 @@ impl Config {
 /// Shared by every handler and middleware.
 pub(crate) struct AppState {
     pub registry: std::sync::Mutex<cubby_db::Registry>,
-    pub access: Option<access::AccessState>,
+    pub oidc: Option<oidc::OidcState>,
     pub sink: Arc<MetricsSink>,
     pub pair_limiter: ratelimit::RateLimiter,
     pub ingest: Option<Ingest>,
@@ -130,10 +149,11 @@ impl AppState {
     }
 }
 
-/// Fetches the Access JWKS once so a wrong URL fails the start; a no-op without Access.
-pub async fn check_access(config: &Config) -> Result<(), String> {
-    match &config.access {
-        Some(cfg) => access::AccessState::new(cfg).prime().await,
+/// Discovers the OIDC provider and fetches its keys once so a wrong issuer fails the start; a
+/// no-op without OIDC.
+pub async fn check_oidc(config: &Config) -> Result<(), String> {
+    match &config.oidc {
+        Some(cfg) => oidc::OidcState::new(cfg).prime().await,
         None => Ok(()),
     }
 }
@@ -163,7 +183,7 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
     ));
     let state = Arc::new(AppState {
         registry: std::sync::Mutex::new(registry),
-        access: config.access.as_ref().map(access::AccessState::new),
+        oidc: config.oidc.as_ref().map(oidc::OidcState::new),
         sink: sink.clone(),
         pair_limiter: ratelimit::RateLimiter::new(5, 60),
         ingest,
@@ -172,10 +192,11 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
         ServeDir::new(&config.web_dir).fallback(ServeFile::new(config.web_dir.join("index.html")));
     Ok(Router::new()
         .route("/healthz", get(healthz))
-        .merge(identity::routes(state))
+        .merge(identity::routes(state.clone()))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .nest_service("/thumbs", ServeDir::new(config.data_dir.join("thumbs")))
         .fallback_service(spa)
+        .layer(middleware::from_fn_with_state(state, parent_page_login))
         .layer(middleware::from_fn_with_state(sink, observe))
         .layer(middleware::from_fn(capture_log_line))
         .layer(middleware::from_fn(cache_control)))
@@ -185,7 +206,7 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
 /// included) is `no-store`, so a CDN that caches by extension can never keep it as a static file; the immutable `/_app` assets keep the long cache they are built with. Without
 /// this a browser heuristically caches a header-less response forever.
 async fn cache_control(req: Request, next: Next) -> Response {
-    let is_api = req.uri().path().starts_with("/api/");
+    let is_api = req.uri().path().starts_with("/api/") || req.uri().path().starts_with("/auth/");
     let is_thumb = req.uri().path().starts_with("/thumbs/");
     let is_icon = req.uri().path().starts_with("/assets/icons/");
     let is_manifest = req.uri().path() == "/assets/manifest.webmanifest";
@@ -223,6 +244,31 @@ async fn cache_control(req: Request, next: Next) -> Response {
         );
     }
     res
+}
+
+/// A browser asking for a `/parent` page with no live session goes to sign in rather than seeing
+/// a shell whose every call is a 401.
+async fn parent_page_login(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let path = req.uri().path();
+    if let Some(oidc) = state.oidc.as_ref()
+        && req.method() == axum::http::Method::GET
+        && (path == "/parent" || path.starts_with("/parent/"))
+        && oidc::session_token(req.headers())
+            .and_then(|t| oidc.session_email(&t))
+            .is_none()
+    {
+        let back = req
+            .uri()
+            .path_and_query()
+            .map_or(path, |p| p.as_str())
+            .to_string();
+        return axum::response::Redirect::to(&oidc::login_url(&back)).into_response();
+    }
+    next.run(req).await
 }
 
 /// An unmounted `/api/*` path is a JSON 404, never the SPA shell with a 200.

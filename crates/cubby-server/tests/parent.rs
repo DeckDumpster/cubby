@@ -9,23 +9,21 @@ use axum::http::{Request, StatusCode};
 use cubby_db::Registry;
 use cubby_server::Config;
 use http_body_util::BodyExt;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-const GOOD_PEM: &str = include_str!("fixtures/good.pem");
-const OTHER_PEM: &str = include_str!("fixtures/other.pem");
-const GOOD_N: &str = include_str!("fixtures/good.n");
-const KID: &str = "test-key";
-const ISS: &str = "https://fam.cloudflareaccess.com";
-const AUD: &str = "aud-tag";
+mod support;
+use support::Provider;
+
 const PARENT: &str = "mum@example.com";
 
 struct Env {
     router: axum::Router,
     dir: PathBuf,
     family_id: String,
+    provider: Provider,
+    parent_cookie: std::sync::Mutex<Option<String>>,
 }
 
 fn now() -> i64 {
@@ -48,40 +46,18 @@ fn temp_dir() -> PathBuf {
     d
 }
 
-async fn jwks_server() -> String {
-    let jwks = json!({"keys": [{"kty": "RSA", "kid": KID, "alg": "RS256", "use": "sig",
-        "n": GOOD_N.trim(), "e": "AQAB"}]});
-    let router = axum::Router::new().route(
-        "/jwks",
-        axum::routing::get(move || {
-            let j = jwks.clone();
-            async move { axum::Json(j) }
-        }),
-    );
-    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/jwks", l.local_addr().unwrap());
-    tokio::spawn(async move { axum::serve(l, router).await.unwrap() });
-    url
-}
-
 async fn env_with(access: bool, otlp: &str) -> Env {
     env_full(access, otlp, None).await
 }
 
 async fn env_full(access: bool, otlp: &str, ingest: Option<cubby_server::Ingest>) -> Env {
     let dir = temp_dir();
-    let jwks = if access {
-        jwks_server().await
-    } else {
-        String::new()
-    };
+    let provider = Provider::start().await;
     let cfg = Config::from_lookup(|k| match k {
         "CUBBY_WEB_DIR" => Some(dir.display().to_string()),
         "CUBBY_DATA_DIR" => Some(dir.join("data").display().to_string()),
         "CUBBY_OTLP_ENDPOINT" => Some(otlp.into()),
-        "CUBBY_ACCESS_TEAM_DOMAIN" if access => Some(ISS.into()),
-        "CUBBY_ACCESS_AUD" if access => Some(AUD.into()),
-        "CUBBY_ACCESS_JWKS_URL" if access => Some(jwks.clone()),
+        k if access => provider.env(k),
         _ => None,
     })
     .unwrap();
@@ -94,6 +70,8 @@ async fn env_full(access: bool, otlp: &str, ingest: Option<cubby_server::Ingest>
         router,
         dir,
         family_id,
+        provider,
+        parent_cookie: Default::default(),
     }
 }
 
@@ -109,6 +87,23 @@ impl Env {
             .unwrap()
     }
 
+    /// Signs `email` in through the fake provider and returns the session cookie.
+    async fn cookie(&self, email: &str) -> String {
+        support::session_cookie(&self.router, &self.provider, email).await
+    }
+
+    async fn parent_session(&self) -> String {
+        let cached = self.parent_cookie.lock().unwrap().clone();
+        match cached {
+            Some(c) => c,
+            None => {
+                let c = self.cookie(PARENT).await;
+                *self.parent_cookie.lock().unwrap() = Some(c.clone());
+                c
+            }
+        }
+    }
+
     async fn call(&self, req: Request<Body>) -> (StatusCode, Value) {
         let res = self.router.clone().oneshot(req).await.unwrap();
         let status = res.status();
@@ -119,7 +114,7 @@ impl Env {
     async fn parent_post(&self, path: &str, jwt: Option<&str>) -> (StatusCode, Value) {
         let mut r = Request::post(path);
         if let Some(j) = jwt {
-            r = r.header("cf-access-jwt-assertion", j);
+            r = r.header("cookie", j);
         }
         self.call(r.body(Body::empty()).unwrap()).await
     }
@@ -144,35 +139,12 @@ impl Env {
     }
 }
 
-fn claims(email: &str, aud: &str, iss: &str, exp: i64, nbf: i64) -> Value {
-    json!({"email": email, "sub": "sub-1", "aud": aud, "iss": iss, "exp": exp, "nbf": nbf})
-}
-
-fn sign(pem: &str, alg: Algorithm, kid: Option<&str>, claims: &Value) -> String {
-    let mut h = Header::new(alg);
-    h.kid = kid.map(str::to_string);
-    let key = match alg {
-        Algorithm::RS256 => EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
-        _ => EncodingKey::from_secret(b"secret"),
-    };
-    jsonwebtoken::encode(&h, claims, &key).unwrap()
-}
-
-fn good_jwt(email: &str) -> String {
-    sign(
-        GOOD_PEM,
-        Algorithm::RS256,
-        Some(KID),
-        &claims(email, AUD, ISS, now() + 300, now() - 10),
-    )
-}
-
 impl Env {
     async fn parent(&self, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
         let mut r = Request::builder()
             .method(method)
             .uri(path)
-            .header("cf-access-jwt-assertion", good_jwt(PARENT));
+            .header("cookie", self.parent_session().await);
         let b = match body {
             Some(b) => {
                 r = r.header("content-type", "application/json");
