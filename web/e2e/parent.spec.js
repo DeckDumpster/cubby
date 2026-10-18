@@ -29,7 +29,7 @@ for (const scheme of ['light', 'dark'])
 			});
 			await page.goto('/parent');
 			for (const t of TABS) {
-				await page.getByRole('button', { name: new RegExp('^' + t) }).click();
+				await page.getByRole('link', { name: new RegExp('^' + t) }).click();
 				await expect(page.locator('section.panel')).toBeVisible();
 				const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
 				expect(overflow, `${t} overflows horizontally`).toBe(false);
@@ -80,4 +80,55 @@ test('one press of Add (or Enter) saves the link and it survives a reload', asyn
 	await input.fill('https://youtu.be/second');
 	await input.press('Enter');
 	await expect.poll(() => posts.length).toBe(2);
+});
+
+const SECTIONS = [['allow', 'Allow-list', 'Allow a video'], ['review', 'Added by your policies', 'Added by your policies'], ['requests', 'Requests', 'Requests'], ['children', 'Children', 'Children'], ['history', 'History', 'History']];
+
+test('each section is its own URL: open by URL or click, reload and back keep it', async ({ page }) => {
+	await page.route('**/api/parent/**', (route) => {
+		const u = route.request().url();
+		const body = u.includes('/history') ? HISTORY : u.includes('/children') ? CHILDREN : u.includes('/policies') ? POLICIES
+			: u.includes('/review') ? REVIEW : u.includes('/requests') ? REQUESTS : {};
+		return route.fulfill({ json: body });
+	});
+	const here = async (key, heading) => {
+		await expect(page).toHaveURL(new RegExp(`/parent/${key}(\\?.*)?$`));
+		await expect(page.getByRole('heading', { level: 2 })).toContainText(heading);
+		await expect(page.getByRole('link', { current: 'page' })).toHaveAttribute('href', `/parent/${key}`);
+	};
+	await page.goto('/parent');
+	await here('allow', 'Allow a video');
+	for (const [key, label, heading] of SECTIONS) {
+		await page.goto(`/parent/${key}`);
+		await here(key, heading);
+		await page.reload();
+		await here(key, heading);
+	}
+	await page.goto('/parent/allow');
+	await page.getByRole('link', { name: /^Children/ }).click();
+	await here('children', 'Children');
+	await page.getByRole('link', { name: /^History/ }).click();
+	await here('history', 'History');
+	await page.goBack();
+	await here('children', 'Children');
+	await page.goBack();
+	await here('allow', 'Allow a video');
+	await page.goForward();
+	await here('children', 'Children');
+});
+
+test('the History child lives in the URL and survives a reload', async ({ page }) => {
+	const asked = [];
+	await page.route('**/api/parent/**', (route) => {
+		const u = route.request().url();
+		if (u.includes('/history')) asked.push(u);
+		return route.fulfill({ json: u.includes('/history') ? HISTORY : u.includes('/children') ? CHILDREN : [] });
+	});
+	await page.goto('/parent/history');
+	await expect(page.getByRole('combobox')).toHaveValue('c1');
+	await page.getByRole('combobox').selectOption('c2');
+	await expect(page).toHaveURL(/\/parent\/history\?child=c2$/);
+	await page.reload();
+	await expect(page.getByRole('combobox')).toHaveValue('c2');
+	expect(asked.at(-1)).toContain('/children/c2/history');
 });

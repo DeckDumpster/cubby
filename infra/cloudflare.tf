@@ -59,6 +59,7 @@ resource "cloudflare_zero_trust_access_application" "parent" {
 
   destinations = [
     { type = "public", uri = "${var.hostname}/parent" },
+    { type = "public", uri = "${var.hostname}/parent/*" },
     { type = "public", uri = "${var.hostname}/api/parent" },
   ]
 
