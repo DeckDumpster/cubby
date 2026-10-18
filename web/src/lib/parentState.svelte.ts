@@ -20,7 +20,7 @@ export type Child = {
 export type Policy = { id: string; kind: string; youtube_id: string; child_id: string | null; title: string; pending?: boolean };
 export type Item = { youtube_id: string; title: string; channel_id: string | null; channel_title: string; policy_kind: string; policy_youtube_id: string };
 export type Req = { id: string; child_name: string; kind: string; title: string; channel_title: string; youtube_id: string };
-export type Grant = { id: string; title: string; youtube_id: string; granted_at: number; watched_s: number; charge: number; end_reason: string | null };
+export type Grant = { id: string; title: string; youtube_id: string; granted_at: number; watched_s: number; charge: number; end_reason: string | null; thumb?: string | null };
 
 /** Everything the /parent sections share; the layout owns one and the section routes read it. */
 export class ParentState {

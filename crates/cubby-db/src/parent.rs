@@ -53,6 +53,7 @@ pub struct Grant {
     pub charge: f64,
     pub ended_at: Option<i64>,
     pub end_reason: Option<String>,
+    pub thumb: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -363,7 +364,8 @@ pub fn put_budget(conn: &Connection, child: &str, b: &Budget) -> Result<()> {
 pub fn history(conn: &Connection, child: &str, limit: usize) -> Result<Vec<Grant>> {
     let mut s = conn.prepare(
         "SELECT g.id, g.youtube_id, COALESCE(v.title,''), g.granted_at, COALESCE(g.watched_s,0),
-                COALESCE(g.charge,0), g.ended_at, g.end_reason
+                COALESCE(g.charge,0), g.ended_at, g.end_reason,
+                CASE WHEN v.thumb_path IS NOT NULL THEN '/thumbs/' || v.thumb_path || '?v=' || COALESCE(v.fetched_at,0) END
          FROM play_grants g LEFT JOIN videos v ON v.youtube_id=g.youtube_id
          WHERE g.child_id=?1 ORDER BY g.granted_at DESC, g.id DESC LIMIT ?2",
     )?;
@@ -377,6 +379,7 @@ pub fn history(conn: &Connection, child: &str, limit: usize) -> Result<Vec<Grant
             charge: r.get(5)?,
             ended_at: r.get(6)?,
             end_reason: r.get(7)?,
+            thumb: r.get(8)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
