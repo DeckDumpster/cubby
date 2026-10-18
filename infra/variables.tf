@@ -36,3 +36,9 @@ variable "session_duration" {
   type    = string
   default = "24h"
 }
+
+variable "permissions_boundary_arn" {
+  type        = string
+  description = "Boundary the terraform-deploy role requires on every IAM user or role it creates."
+  default     = "arn:aws:iam::189923011121:policy/terraform-deploy-boundary"
+}

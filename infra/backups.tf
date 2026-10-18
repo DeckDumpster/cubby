@@ -76,7 +76,8 @@ resource "aws_s3_bucket_policy" "backups" {
 }
 
 resource "aws_iam_user" "backup" {
-  name = "cubby-litestream"
+  name                 = "cubby-litestream"
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "backup" {
