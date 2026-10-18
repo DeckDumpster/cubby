@@ -42,7 +42,7 @@ test('only same-origin urls survive', () => {
 
 test('the player is configured as the LLD says', () => {
 	assert.equal(PLAYER_HOST, 'https://www.youtube-nocookie.com');
-	assert.deepEqual(PLAYER_VARS, { autoplay: 0, rel: 0, playsinline: 1, fs: 1, iv_load_policy: 3 });
+	assert.deepEqual(PLAYER_VARS, { autoplay: 0, rel: 0, playsinline: 1, fs: 0, iv_load_policy: 3, controls: 0, disablekb: 1 });
 });
 
 test('a beat is due every 10 seconds', () => {

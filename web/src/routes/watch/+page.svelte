@@ -6,10 +6,11 @@
 		api,
 		badge,
 		BEAT_MS,
-		endReason,
-		isShell,
+		clock,
+	endReason,
 		loadYT,
 		localUrl,
+		offList,
 		PLAYER_HOST,
 		PLAYER_VARS,
 		refusalMessage,
@@ -23,7 +24,6 @@
 
 	const SHOWN = 8;
 	const origin = typeof location === 'undefined' ? 'http://localhost' : location.origin;
-	const shell = typeof navigator !== 'undefined' && isShell(navigator.userAgent);
 
 	let paired = $state(true);
 	let code = $state('');
@@ -43,6 +43,10 @@
 	let current = $state<Tile | null>(null);
 	let refusal = $state('');
 	let paused = $state(false);
+	let playing = $state(false);
+	let pos = $state(0);
+	let dur = $state(0);
+	let poll: ReturnType<typeof setInterval> | undefined;
 	let suggestions = $state<Tile[]>([]);
 	let sent = $state<Record<string, boolean>>({});
 	let host: HTMLDivElement | undefined = $state();
@@ -146,6 +150,8 @@
 	function destroyPlayer() {
 		clearInterval(timer);
 		timer = undefined;
+		clearInterval(poll);
+		poll = undefined;
 		try {
 			player?.destroy();
 		} catch {
@@ -153,6 +159,9 @@
 		}
 		player = null;
 		paused = false;
+		playing = false;
+		pos = 0;
+		dur = 0;
 	}
 
 	async function beat(state: string) {
@@ -174,6 +183,33 @@
 		const id = grantId;
 		grantId = '';
 		if (id) await api(`/api/child/grant/${id}/end`, { body: { reason: endReason(reason) } });
+	}
+
+	function tickClock() {
+		try {
+			pos = player.getCurrentTime() ?? pos;
+			dur = player.getDuration?.() || dur;
+		} catch {
+			/* not ready */
+		}
+	}
+
+	function toggle() {
+		if (!player) return;
+		if (playing) player.pauseVideo?.();
+		else player.playVideo?.();
+	}
+
+	function seek(e: Event) {
+		const v = Number((e.target as HTMLInputElement).value);
+		pos = v;
+		player?.seekTo?.(v, true);
+	}
+
+	async function resume() {
+		paused = false;
+		await tick();
+		player?.playVideo?.();
 	}
 
 	async function finish(reason: string, next: 'ended' | 'stopped') {
@@ -246,17 +282,27 @@
 
 	function onState(YT: any, s: number) {
 		const S = YT.PlayerState;
+		if (grantId && current && offList(player, current.youtube_id)) {
+			finish('off-list', 'stopped');
+			return;
+		}
 		if (s === S.PLAYING) {
 			paused = false;
+			playing = true;
+			clearInterval(poll);
+			poll = setInterval(tickClock, 500);
 			lastBeat = Date.now();
 			clearInterval(timer);
 			timer = setInterval(() => beat('playing'), BEAT_MS);
 		} else if (s === S.PAUSED) {
 			clearInterval(timer);
 			timer = undefined;
-			paused = shell;
+			playing = false;
+			tickClock();
+			paused = true;
 			beat('paused');
 		} else if (s === S.ENDED) {
+			playing = false;
 			finish('ended', 'ended');
 		}
 	}
@@ -361,14 +407,19 @@
 		{:else if view === 'playing' && current}
 			<h1 class="now">{current.title}</h1>
 			<div class="stage">
-				<div class="player" bind:this={host}></div>
+				<div class="player" class:hidden={paused} bind:this={host}></div>
 				{#if paused}
 					<div class="pause" data-testid="pause-card">
 						<h2>Taking a break?</h2>
-						<button onclick={() => (paused = false)}>Keep watching</button>
+						<button data-testid="resume" onclick={resume}>Keep watching</button>
 						<button onclick={back}>All done</button>
 					</div>
 				{/if}
+			</div>
+			<div class="controls" data-testid="controls">
+				<button class="big" data-testid="playpause" aria-label={playing ? 'Pause' : 'Play'} onclick={toggle}>{playing ? '⏸' : '▶'}</button>
+				<input type="range" aria-label="seek" min="0" max={dur || 0} step="1" value={pos} oninput={seek} />
+				<span data-testid="clock">{clock(pos)} / {dur ? `-${clock(dur - pos)}` : '--:--'}</span>
 			</div>
 			<div class="actions">
 				<button disabled={sent[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
@@ -403,7 +454,12 @@
 	.title { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 	.card { text-align: center; padding: 2rem; }
 	.stage { position: relative; aspect-ratio: 16 / 9; background: #000; }
+	.hidden { display: none; }
+	.stage:has(.hidden) { background: #fff; }
+	.controls { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
+	.controls input { flex: 1; height: 2.5rem; }
+	.big { font-size: 2rem; min-width: 5rem; min-height: 4rem; }
 	.player, .player :global(iframe) { width: 100%; height: 100%; }
-	.pause { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.95); display: flex; flex-direction: column; gap: 1rem; align-items: center; justify-content: center; }
+	.pause { position: absolute; inset: 0; background: #fff; display: flex; flex-direction: column; gap: 1rem; align-items: center; justify-content: center; }
 	.actions { display: flex; gap: 1rem; margin-top: 1rem; }
 </style>

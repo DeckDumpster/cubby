@@ -262,7 +262,7 @@ pub fn end(
     reason: &str,
     now: i64,
 ) -> Result<(), PlayError> {
-    if !matches!(reason, "ended" | "left" | "stop") {
+    if !matches!(reason, "ended" | "left" | "stop" | "off-list") {
         return Err(PlayError::BadInput("reason"));
     }
     reap_stale(conn, now)?;
