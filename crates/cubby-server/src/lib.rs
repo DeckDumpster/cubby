@@ -132,7 +132,19 @@ pub(crate) struct AppState {
     pub sink: Arc<MetricsSink>,
     pub pair_limiter: ratelimit::RateLimiter,
     pub ingest: Option<Ingest>,
+    pub resolver: Option<ChannelResolver>,
 }
+
+/// Turns a channel named by handle or legacy username into its `UC` id and title; called when a
+/// parent previews or adds one. `Ok(None)` is a name the Data API does not know.
+pub type ChannelResolver = Arc<
+    dyn Fn(
+            &rusqlite::Connection,
+            &cubby_core::policy_url::ChannelLookup,
+        ) -> Result<Option<cubby_yt::ChannelInfo>, String>
+        + Send
+        + Sync,
+>;
 
 /// Runs one metadata pass over a family's database; called when a parent allows a link.
 pub type Ingest = Arc<dyn Fn(&rusqlite::Connection) + Send + Sync>;
@@ -170,11 +182,32 @@ pub fn app(config: &Config) -> Result<Router, String> {
             cubby_worker::run_pass(conn, &transport, now, Some(&thumbs));
         }) as Ingest
     });
-    app_with_ingest(config, ingest)
+    let resolver: Option<ChannelResolver> = (!config.yt_api_key.is_empty()).then(|| {
+        let key = config.yt_api_key.clone();
+        Arc::new(
+            move |conn: &rusqlite::Connection, l: &cubby_core::policy_url::ChannelLookup| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs() as i64);
+                let transport = cubby_yt::HttpTransport::new(&key);
+                cubby_worker::lookup_channel(conn, &transport, now, l).map_err(|e| e.to_string())
+            },
+        ) as ChannelResolver
+    });
+    app_with_hooks(config, ingest, resolver)
 }
 
 /// [`app`] with the allow-time metadata pass supplied by the caller (tests pass a fixture one).
 pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router, String> {
+    app_with_hooks(config, ingest, None)
+}
+
+/// [`app_with_ingest`] and the channel-name resolver supplied by the caller.
+pub fn app_with_hooks(
+    config: &Config,
+    ingest: Option<Ingest>,
+    resolver: Option<ChannelResolver>,
+) -> Result<Router, String> {
     let registry = cubby_db::Registry::open(&config.data_dir)
         .map_err(|e| format!("open registry in {}: {e}", config.data_dir.display()))?;
     let sink = Arc::new(MetricsSink::new(
@@ -187,6 +220,7 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
         sink: sink.clone(),
         pair_limiter: ratelimit::RateLimiter::new(5, 60),
         ingest,
+        resolver,
     });
     let spa =
         ServeDir::new(&config.web_dir).fallback(ServeFile::new(config.web_dir.join("index.html")));

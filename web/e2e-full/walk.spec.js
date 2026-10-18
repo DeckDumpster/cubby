@@ -6,7 +6,7 @@
 //     environment lacks is skipped with its reason printed.
 import { spawnSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { PARENT_EMAIL, VIDEOS } from './stack.js';
+import { PARENT_EMAIL, VIDEOS, HANDLE } from './stack.js';
 
 const smoke = !!process.env.SMOKE_BASE_URL;
 const VOLCANO = 'VOLCANO0001';
@@ -84,6 +84,13 @@ test.describe('hermetic stack', () => {
 			await expect(parent.getByRole('alert')).toHaveCount(0);
 		});
 
+		await test.step('allows a channel by its @handle', async () => {
+			await parent.getByPlaceholder('Paste a YouTube link').fill(`https://www.youtube.com/${HANDLE.handle}`);
+			await parent.getByRole('button', { name: 'Add', exact: true }).click();
+			await expect(parent.locator('ul.list li').filter({ hasText: VIDEOS[HANDLE.video].channelTitle })).toBeVisible();
+			await expect(parent.getByRole('alert')).toHaveCount(0);
+		});
+
 		const childCtx = await browser.newContext({ baseURL });
 		await childCtx.addInitScript(FAKE_PLAYER);
 		const child = await childCtx.newPage();
@@ -96,9 +103,10 @@ test.describe('hermetic stack', () => {
 			await expect(child.getByLabel('pairing code')).toHaveCount(0);
 		});
 
-		await test.step('home shows the allowed video, and only it', async () => {
+		await test.step('home shows the allowed video and the handle channel's, and no other', async () => {
 			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
 			await expect(child.getByText(VIDEOS[SLIME].title)).toHaveCount(0);
+			await expect(child.getByRole('button', { name: VIDEOS[HANDLE.video].title }).first()).toBeVisible();
 			await expect
 				.poll(() => child.locator('img.thumb').evaluateAll((imgs) => imgs.length > 0 && imgs.every((i) => i.naturalWidth > 0)))
 				.toBe(true);

@@ -11,8 +11,12 @@ import { join, resolve } from 'node:path';
 export const PARENT_EMAIL = 'parent@example.test';
 export const VIDEOS = {
 	VOLCANO0001: { title: 'Volcano experiments at home', channel: 'UCscience0001', channelTitle: 'Science for Kids' },
-	SLIME000002: { title: 'Slime recipes', channel: 'UCcrafty0002', channelTitle: 'Crafty' }
+	SLIME000002: { title: 'Slime recipes', channel: 'UCcrafty0002', channelTitle: 'Crafty' },
+	PUPS0000003: { title: 'Pups save the day', channel: 'UCpups000003', channelTitle: "Skye's Pup Squad" }
 };
+// The channel a parent adds by @handle: the Data API finds it only through forHandle, and a
+// channels?id= lookup of the handle itself returns nothing (the bug this walk guards).
+export const HANDLE = { handle: '@SkyesPupSquad', id: 'UCpups000003', uploads: 'UUpups000003', video: 'PUPS0000003' };
 // 1x1 JPEG
 const JPEG = Buffer.from(
 	'/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=',
@@ -107,6 +111,15 @@ function fakeYouTube() {
 				}));
 			return json({ items });
 		}
+		if (u.pathname.endsWith('/channels')) {
+			if (u.searchParams.get('forHandle') === HANDLE.handle)
+				return json({ items: [{ id: HANDLE.id, snippet: { title: VIDEOS[HANDLE.video].channelTitle } }] });
+			if (u.searchParams.get('id') === HANDLE.id)
+				return json({ items: [{ id: HANDLE.id, contentDetails: { relatedPlaylists: { uploads: HANDLE.uploads } } }] });
+			return json({ items: [] });
+		}
+		if (u.pathname.endsWith('/playlistItems') && u.searchParams.get('playlistId') === HANDLE.uploads)
+			return json({ items: [{ contentDetails: { videoId: HANDLE.video } }] });
 		json({ items: [] });
 	});
 	return { server, calls };
