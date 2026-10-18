@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Builds the cubby image and installs the Quadlet units for the invoking user, then restarts
-# the server and enables the worker timer. Run it from the production checkout (~/cubby-prod), never
-# from a worktree.
+# the server and enables the worker timer. Run it from the production checkout (~/cubby-prod on the
+# host named in deploy/prod-host), never from a worktree. It refuses on any other host: the Spira box
+# (agent-swarm-test) runs nothing but Spira.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+prod_host="$(tr -d '[:space:]' < "$root/deploy/prod-host")"
+this_host="${CUBBY_DEPLOY_HOSTNAME:-$(hostname)}"
+if [ "$this_host" != "$prod_host" ]; then
+    echo "refusing to deploy on '$this_host': Cubby production is '$prod_host' (deploy/prod-host)" >&2
+    exit 1
+fi
 cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/cubby"
 HOME_CFG="$cfg_dir"
 quadlet_dir="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
