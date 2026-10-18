@@ -23,6 +23,9 @@ cargo test --workspace
 echo "==> deploy artefacts"
 bash deploy/test-deploy.sh
 
+echo "==> infra: npm ci, check, template test, cdk synth"
+(cd infra && npm ci && npm run check && npm test && npx cdk synth --quiet)
+
 cd web
 echo "==> npm ci"
 npm ci

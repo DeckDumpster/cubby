@@ -1,0 +1,4 @@
+{
+	"app": "npx tsx bin/cubby.ts",
+	"output": "cdk.out"
+}
