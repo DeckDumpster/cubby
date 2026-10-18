@@ -38,8 +38,36 @@ else
     echo "quadlet generator not installed: static check only"
 fi
 
+# --- Access settings: an empty server.env with no Terraform makes deploy refuse, naming all three;
+# a deploy from scratch with Terraform outputs available ends with them set.
+a="$(mktemp -d)"; fakebin="$(mktemp -d)"
+printf '#!/bin/sh\nexit 1\n' >"$fakebin/terraform"; chmod +x "$fakebin/terraform"
+if msg="$(PATH="$fakebin:$PATH" CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$a" ./deploy.sh 2>&1)"; then fail "deploy succeeded with empty server.env"; fi
+for v in CUBBY_ACCESS_TEAM_DOMAIN CUBBY_ACCESS_AUD CUBBY_ACCESS_JWKS_URL; do
+    case "$msg" in *"$v"*) ;; *) fail "refusal does not name $v: $msg";; esac
+done
+cat >"$fakebin/terraform" <<'T'
+#!/bin/sh
+case "$*" in
+*access_team_domain) printf 'https://t.cloudflareaccess.com';;
+*access_aud) printf 'aud123';;
+*access_jwks_url) printf 'https://t.cloudflareaccess.com/cdn-cgi/access/certs';;
+*) exit 1;;
+esac
+T
+printf 'CUBBY_PORT=1\nCUBBY_ACCESS_AUD=stale\n' >"$a/cubby/server.env"
+PATH="$fakebin:$PATH" CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$a" ./deploy.sh >/dev/null
+grep -qx 'CUBBY_ACCESS_AUD=aud123' "$a/cubby/server.env" || fail "aud not written"
+grep -qx 'CUBBY_ACCESS_TEAM_DOMAIN=https://t.cloudflareaccess.com' "$a/cubby/server.env" || fail "team not written"
+grep -q '^CUBBY_ACCESS_JWKS_URL=.*certs$' "$a/cubby/server.env" || fail "jwks not written"
+grep -qx 'CUBBY_PORT=1' "$a/cubby/server.env" || fail "other settings dropped"
+[ "$(grep -c AUD "$a/cubby/server.env")" = 1 ] || fail "stale aud kept"
+rm -rf "$a" "$fakebin"
+
 # --- Deploy is idempotent: running the install step twice leaves identical files.
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
+mkdir -p "$t/cubby"
+printf 'CUBBY_ACCESS_TEAM_DOMAIN=x\nCUBBY_ACCESS_AUD=y\nCUBBY_ACCESS_JWKS_URL=z\n' >"$t/cubby/server.env"
 for i in 1 2; do CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$t" ./deploy.sh >/dev/null; done
 ( cd "$t" && find . -type f | sort | xargs sha256sum ) > "$t.sum1"
 CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$t" ./deploy.sh >/dev/null
