@@ -174,20 +174,29 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
         .route("/healthz", get(healthz))
         .merge(identity::routes(state))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
+        .nest_service("/thumbs", ServeDir::new(config.data_dir.join("thumbs")))
         .fallback_service(spa)
         .layer(middleware::from_fn_with_state(sink, observe))
         .layer(middleware::from_fn(capture_log_line))
         .layer(middleware::from_fn(cache_control)))
 }
 
-/// No `/api/*` response is ever cached (errors and 401s included), and the SPA shell is always
+/// Thumbnails are cached for a year; no `/api/*` response is ever cached (errors and 401s included), and the SPA shell is always
 /// revalidated; the immutable `/_app` assets keep the long cache they are built with. Without
 /// this a browser heuristically caches a header-less response forever.
 async fn cache_control(req: Request, next: Next) -> Response {
     let is_api = req.uri().path().starts_with("/api/");
+    let is_thumb = req.uri().path().starts_with("/thumbs/");
     let mut res = next.run(req).await;
     let value = if is_api {
         Some("no-store")
+    } else if is_thumb {
+        // Thumbnails are named for their video and never rewritten; a miss must not stick.
+        Some(if res.status().is_success() {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-store"
+        })
     } else if res
         .headers()
         .get(axum::http::header::CONTENT_TYPE)

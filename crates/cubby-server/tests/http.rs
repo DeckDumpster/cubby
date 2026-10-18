@@ -196,3 +196,27 @@ async fn other_static_assets_keep_their_own_caching() {
         .unwrap();
     assert!(res.headers().get("cache-control").is_none());
 }
+
+#[tokio::test]
+async fn a_thumb_the_worker_wrote_is_served_as_an_image_and_a_missing_one_is_404() {
+    let dir = web_dir();
+    std::fs::create_dir_all(dir.join("data/thumbs")).unwrap();
+    std::fs::write(dir.join("data/thumbs/abc.jpg"), [0xff, 0xd8, 0xff, 0xd9]).unwrap();
+    let router = app(&config(&dir, "")).unwrap();
+    let res = router
+        .clone()
+        .oneshot(Request::get("/thumbs/abc.jpg").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-type"], "image/jpeg");
+    assert!(
+        res.headers()["cache-control"]
+            .to_str()
+            .unwrap()
+            .contains("max-age=")
+    );
+    let (status, body) = get(router, "/thumbs/missing.jpg").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!body.contains("cubby shell"));
+}
