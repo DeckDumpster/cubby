@@ -64,19 +64,38 @@ export function requestLabel(kind) {
  * @param {unknown} [body]
  */
 export async function api(method, path, body) {
-	const res = await fetch(path, {
-		method,
-		cache: 'no-store',
-		headers: body === undefined ? {} : { 'content-type': 'application/json' },
-		body: body === undefined ? undefined : JSON.stringify(body)
-	});
-	// An expired session: sign in again and come back to this page.
-	if (res.status === 401 && typeof location !== 'undefined' && location.pathname.startsWith('/parent')) {
-		location.assign(`/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+	/** @type {Response} */
+	let res;
+	try {
+		res = await fetch(path, {
+			method,
+			cache: 'no-store',
+			redirect: 'manual',
+			headers: body === undefined ? {} : { 'content-type': 'application/json' },
+			body: body === undefined ? undefined : JSON.stringify(body)
+		});
+	} catch (e) {
+		// A same-origin API call that throws was redirected away (an expired Access session sends it
+		// cross-origin), which is a sign-in problem, not a network one.
+		if (e instanceof TypeError && signIn()) return new Promise(() => {});
+		throw e;
 	}
+	if ((res.status === 401 || res.type === 'opaqueredirect') && signIn()) return new Promise(() => {});
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
 	return data;
+}
+
+/** Sends the browser to sign in and back to this page; false outside a /parent page. */
+function signIn() {
+	if (typeof location === 'undefined' || !location.pathname.startsWith('/parent')) return false;
+	location.assign(loginHref(location.pathname + location.search));
+	return true;
+}
+
+/** @param {string} back */
+export function loginHref(back) {
+	return `/auth/login?next=${encodeURIComponent(back)}`;
 }
 
 /** @param {string} id */

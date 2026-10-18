@@ -171,6 +171,36 @@ test.describe('hermetic stack', () => {
 	});
 });
 
+test.describe('signed out', () => {
+	test.skip(smoke, 'needs the fake Pocket ID of the harness');
+
+	test('opening /parent/children signs in and returns there with no error shown', async ({ browser, baseURL }) => {
+		const page = await (await browser.newContext({ baseURL })).newPage();
+		await page.goto('/parent/children');
+		await page.waitForURL(/\/parent\/children$/);
+		await expect(page.getByRole('link', { name: 'Sign out' })).toBeVisible();
+		await expect(page.getByRole('alert')).toHaveCount(0);
+		await expect(page.getByText(/NetworkError|sign in required/)).toHaveCount(0);
+	});
+
+	test('a 401 or a redirected API call mid-session goes through sign-in and back', async ({ browser, baseURL }) => {
+		const ctx = await browser.newContext({ baseURL });
+		const page = await ctx.newPage();
+		await page.goto('/parent/children');
+		await page.waitForURL(/\/parent\/children$/);
+		await ctx.clearCookies();
+		await page.getByRole('link', { name: /^History/ }).click();
+		await page.waitForURL(/\/parent\/history/);
+		await expect(page.getByRole('link', { name: 'Sign out' })).toBeVisible();
+		await expect(page.getByText(/NetworkError|sign in required/)).toHaveCount(0);
+
+		await page.route('**/api/parent/children', (r) => r.abort('failed'), { times: 1 });
+		await page.goto('/parent/children');
+		await page.waitForURL(/\/parent\/children$/);
+		await expect(page.getByText(/NetworkError/)).toHaveCount(0);
+	});
+});
+
 test.describe('smoke walk, pointed at the harness stack', () => {
 	test.skip(smoke, 'the smoke walk is run by deploy/smoke.sh in this mode');
 

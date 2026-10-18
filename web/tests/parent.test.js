@@ -39,3 +39,8 @@ test('request kinds have parent-facing labels', () => {
 	assert.match(requestLabel('like'), /liked/);
 	assert.match(requestLabel('more-from-channel'), /more/);
 });
+
+test('loginHref returns to the given path', async () => {
+	const { loginHref } = await import('../src/lib/parent.js');
+	assert.equal(loginHref('/parent/children?x=1'), '/auth/login?next=%2Fparent%2Fchildren%3Fx%3D1');
+});
