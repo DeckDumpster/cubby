@@ -108,6 +108,15 @@
 		}
 	}
 
+	function unpair() {
+		if (!confirm('Unpair this device? A grown-up will need to make a new code.')) return;
+		token.clear();
+		paired = false;
+		sections = [];
+		results = null;
+		code = '';
+	}
+
 	// The URL is the search state: /watch is home, /watch?q=... is a search, so back leaves it.
 	const urlQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
 	let searchSeq = 0;
@@ -327,16 +336,29 @@
 	</button>
 {/snippet}
 
-<main>
+<main class="watch">
 	{#if !paired}
-		<form class="card" onsubmit={pair}>
+		<form class="card pair" onsubmit={pair}>
 			<h1>Hi! Type your code</h1>
-			<input aria-label="pairing code" bind:value={code} inputmode="numeric" autocomplete="off" />
-			<button type="submit">Go</button>
-			{#if pairError}<p role="alert">{pairError}</p>{/if}
+			<input
+				class="code"
+				aria-label="pairing code"
+				bind:value={code}
+				oninput={() => (code = code.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+				maxlength="6"
+				inputmode="text"
+				autocapitalize="characters"
+				autocorrect="off"
+				spellcheck="false"
+				autocomplete="off"
+				placeholder="······"
+			/>
+			<button class="primary go" type="submit">Go</button>
+			{#if pairError}<p class="error" role="alert">{pairError}</p>{/if}
 		</form>
 	{:else}
 		<header>
+			<span class="brand"><span class="logo">C</span>Cubby</span>
 			{#if child.name}<span class="hello" data-testid="greeting"><span class="me">{child.avatar}</span> Hi, {child.name}!</span>{/if}
 			{#if view !== 'grid'}<button class="back" onclick={back}>← Back</button>{/if}
 			{#if badgeInfo}
@@ -347,7 +369,7 @@
 			{/if}
 		</header>
 
-		{#if error}<p role="alert">{error}</p>{/if}
+		{#if error}<p class="error" role="alert">{error}</p>{/if}
 
 		{#if view === 'grid'}
 			<form class="search" role="search" onsubmit={search}>
@@ -355,7 +377,7 @@
 					<input type="search" aria-label="search" placeholder="Search" bind:value={query} oninput={onSearchInput} />
 					{#if query}<button type="button" class="clear" aria-label="Clear" onclick={home}>✕</button>{/if}
 				</span>
-				<button type="submit">Search</button>
+				<button class="primary" type="submit">Search</button>
 			</form>
 			{#if urlQuery}
 				<div class="searched">
@@ -365,7 +387,7 @@
 			{/if}
 			{#if results && searched === urlQuery}
 				<section>
-					{#if results.length === 0}<p>Nothing found.</p>{/if}
+					{#if results.length === 0}<p class="empty">Nothing found.</p>{/if}
 					<div class="grid">{#each results as t (t.youtube_id)}{@render tile(t)}{/each}</div>
 				</section>
 			{:else}
@@ -387,23 +409,23 @@
 				{/each}
 			{/if}
 		{:else if view === 'loading'}
-			<p>One moment…</p>
+			<p class="empty">One moment…</p>
 		{:else if view === 'refused'}
 			<div class="card" data-testid="refusal">
 				<h1>{refusal}</h1>
-				<button onclick={back}>OK</button>
+				<button class="primary" onclick={back}>OK</button>
 			</div>
 		{:else if view === 'stopped'}
 			<div class="card" data-testid="stopped">
 				<h1>All done for now</h1>
-				<button onclick={back}>OK</button>
+				<button class="primary" onclick={back}>OK</button>
 			</div>
 		{:else if view === 'ended'}
 			<div class="card" data-testid="end-card">
 				<h1>That was fun!</h1>
 				{#if badgeInfo}<p data-testid="end-budget">{badgeInfo.text}</p>{/if}
 				<div class="grid">{#each suggestions as t (t.youtube_id)}{@render tile(t)}{/each}</div>
-				<button onclick={back}>Back to all videos</button>
+				<button class="primary" onclick={back}>Back to all videos</button>
 			</div>
 		{:else if view === 'playing' && current}
 			<h1 class="now">{current.title}</h1>
@@ -411,8 +433,8 @@
 				<div class="player" class:hidden={paused} bind:this={host}></div>
 				{#if paused}
 					<div class="pause" data-testid="pause-card">
-						<h2>Taking a break?</h2>
-						<button data-testid="resume" onclick={resume}>Keep watching</button>
+						<h2 class="break">Taking a break?</h2>
+						<button class="primary" data-testid="resume" onclick={resume}>Keep watching</button>
 						<button onclick={back}>All done</button>
 					</div>
 				{/if}
@@ -432,37 +454,76 @@
 			</div>
 		{/if}
 	{/if}
+	{#if paired && view === 'grid'}
+		<footer><button class="unpair" onclick={unpair}>Grown-up: unpair this device</button></footer>
+	{/if}
 </main>
 
 <style>
-	main { max-width: 72rem; margin: 0 auto; padding: 1rem; font-family: system-ui, sans-serif; font-size: 1.25rem; }
-	.hello { font-size: 1.2rem; font-weight: 600; }
-	.me { font-size: 1.5rem; }
-	header { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; }
-	.badge { display: flex; flex-direction: column; gap: 0.25rem; margin-left: auto; font-weight: 600; }
-	.meter { display: block; width: 14rem; height: 0.75rem; background: #ddd; border-radius: 1rem; overflow: hidden; }
-	.fill { display: block; height: 100%; background: #2a9d4b; }
-	button { font-size: 1.25rem; padding: 0.75rem 1.25rem; border-radius: 0.75rem; border: 2px solid #345; background: #fff; }
-	.search { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+	.watch { max-width: 76rem; margin: 0 auto; padding: var(--space-4) var(--space-4) var(--space-5); font-size: 1.25rem; min-height: 100vh; }
+	header { display: flex; gap: var(--space-4); align-items: center; margin-bottom: var(--space-4); }
+	.brand { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 800; font-size: 1.5rem; }
+	.logo { display: inline-grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-weight: 800; }
+	h1 { font-size: 2rem; margin: 0 0 var(--space-4); line-height: 1.2; }
+	h2 { font-size: 1.6rem; margin: var(--space-5) 0 var(--space-3); }
+	h1.now { font-size: 1.5rem; margin: 0 0 var(--space-3); }
+
+	.badge { display: flex; flex-direction: column; gap: var(--space-1); margin-left: auto; font-weight: 700; background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-4); }
+	.meter { display: block; width: 14rem; max-width: 100%; height: 0.8rem; background: var(--surface-2); border: 1px solid var(--muted); border-radius: 1rem; overflow: hidden; }
+	.fill { display: block; height: 100%; background: var(--ok); }
+
+	button, input { font: inherit; color: var(--text); }
+	button { min-height: 3.5rem; padding: 0 var(--space-5); border-radius: 14px; border: 2px solid var(--text); background: var(--surface); font-weight: 700; cursor: pointer; }
+	button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+	button:disabled { background: var(--surface-2); color: var(--muted); border-color: var(--border); cursor: default; }
+	:is(button, input):focus-visible { outline: 4px solid var(--accent); outline-offset: 3px; }
+
+	.search { display: flex; gap: var(--space-3); margin-bottom: var(--space-4); }
+	.search input { flex: 1; min-width: 0; min-height: 3.5rem; font-size: 1.4rem; padding: 0 var(--space-4); border: 2px solid var(--text); border-radius: 14px; background: var(--surface); }
+	input::placeholder { color: var(--muted); opacity: 1; }
+
+	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-4); }
+	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; min-height: 0; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
+	.thumb { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--surface-2); }
+	.meta { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3); }
+	.avatar { width: 2rem; height: 2rem; border-radius: 50%; flex: none; }
+	.title { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 1.1rem; line-height: 1.3; font-weight: 700; color: var(--text); }
+	.more { margin-top: var(--space-4); }
+
+	.card { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); text-align: center; padding: var(--space-5); margin: var(--space-4) auto; max-width: 56rem; }
+	.card .grid { margin: var(--space-4) 0; text-align: left; }
+	.pair { max-width: 30rem; margin-top: 8vh; display: grid; gap: var(--space-4); justify-items: stretch; }
+	.pair h1 { margin: 0; }
+	.code { min-height: 5rem; width: 100%; font-family: var(--mono); font-size: 2.75rem; font-weight: 700; letter-spacing: 0.35em; text-align: center; text-indent: 0.35em; text-transform: uppercase; padding: 0 var(--space-3); border: 3px solid var(--text); border-radius: 16px; background: var(--surface); }
+	.go { min-height: 4.5rem; font-size: 1.75rem; width: 100%; }
+
+	.empty { text-align: center; color: var(--text); background: var(--surface); border: 2px dashed var(--muted); border-radius: var(--radius); padding: var(--space-5); font-size: 1.4rem; }
+	.error { background: var(--danger-bg); color: var(--danger); border: 2px solid var(--danger); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin: 0; font-weight: 600; }
+
+	.stage { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; }
+	.player, .player :global(iframe) { width: 100%; height: 100%; border: 0; }
+	.pause { position: absolute; inset: 0; background: var(--surface); display: flex; flex-direction: column; gap: var(--space-4); align-items: center; justify-content: center; }
+	.break { margin: 0; font-size: 2rem; }
+	.actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+
+	footer { margin-top: var(--space-5); text-align: center; }
+	.unpair { min-height: var(--touch); font-size: 0.9rem; font-weight: 500; padding: 0 var(--space-3); border: 0; background: transparent; color: var(--muted); text-decoration: underline; }
+
+	@media (max-width: 700px) {
+		.badge { margin-left: 0; }
+		header { flex-wrap: wrap; }
+	}
+	.hello { font-size: 1.3rem; font-weight: 700; }
+	.me { font-size: 1.6rem; }
 	.box { flex: 1; position: relative; display: flex; }
-	.clear { position: absolute; right: 0.25rem; top: 50%; transform: translateY(-50%); border: none; background: none; padding: 0.5rem 0.75rem; }
-	.searched { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; }
+	.box input { width: 100%; padding-right: 3.5rem; }
+	.clear { position: absolute; right: 0.25rem; top: 50%; transform: translateY(-50%); min-height: var(--touch); min-width: var(--touch); padding: 0; border: 0; background: none; font-size: 1.25rem; }
+	.searched { display: flex; gap: var(--space-4); align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; }
 	.searched h2 { margin: 0; }
-	.search input { flex: 1; font-size: 1.5rem; padding: 0.75rem; }
-	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem; }
-	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; }
-	.thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #ccd; }
-	.meta { display: flex; gap: 0.5rem; padding: 0.5rem; }
-	.avatar { width: 2rem; height: 2rem; border-radius: 50%; }
-	.title { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-	.card { text-align: center; padding: 2rem; }
-	.stage { position: relative; aspect-ratio: 16 / 9; background: #000; }
 	.hidden { display: none; }
-	.stage:has(.hidden) { background: #fff; }
-	.controls { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
-	.controls input { flex: 1; height: 2.5rem; }
+	.stage:has(.hidden) { background: var(--surface); }
+	.controls { display: flex; gap: var(--space-4); align-items: center; margin-top: var(--space-4); }
+	.controls input { flex: 1; min-height: var(--touch); padding: 0; accent-color: var(--accent); }
+	.controls span { font-variant-numeric: tabular-nums; font-weight: 700; }
 	.big { font-size: 2rem; min-width: 5rem; min-height: 4rem; }
-	.player, .player :global(iframe) { width: 100%; height: 100%; }
-	.pause { position: absolute; inset: 0; background: #fff; display: flex; flex-direction: column; gap: 1rem; align-items: center; justify-content: center; }
-	.actions { display: flex; gap: 1rem; margin-top: 1rem; }
 </style>
