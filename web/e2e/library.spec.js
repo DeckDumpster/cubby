@@ -52,7 +52,9 @@ for (const path of ['allow', 'review'])
 			await expect(science).toHaveAttribute('aria-expanded', 'false');
 			await expect(page.getByText('episode 000')).toHaveCount(0);
 
+			const sorted = page.waitForRequest((r) => r.url().includes('/library/videos') && r.url().includes('sort=title'));
 			await science.click();
+			await sorted; // the every-upload group loads with the default title sort
 			await expect(science).toHaveAttribute('aria-expanded', 'true');
 			await expect(page.locator('.lib-videos li')).toHaveCount(100);
 			// episode 003 was seeded with 3 plays and 270 s watched.

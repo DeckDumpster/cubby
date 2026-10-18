@@ -420,9 +420,9 @@ pub fn library_videos(
 ) -> Result<(i64, Vec<LibraryVideo>)> {
     let fts = f.q.as_deref().and_then(crate::browse::fts_query);
     let order = match sort {
-        "plays" => "plays DESC, title COLLATE NOCASE",
-        "time" => "watched DESC, title COLLATE NOCASE",
-        "title" | "" => "title COLLATE NOCASE, youtube_id",
+        "plays" => "plays DESC, e.title COLLATE NOCASE, e.youtube_id",
+        "time" => "watched DESC, e.title COLLATE NOCASE, e.youtube_id",
+        "title" | "" => "e.title COLLATE NOCASE, e.youtube_id",
         other => return Err(DbError::Invalid(format!("unknown sort {other:?}"))),
     };
     let mut s = conn.prepare(&format!(
@@ -940,6 +940,8 @@ mod tests {
         let (total, v) = library_videos(&c, &f, "ch1", None, "plays", 0, 2).unwrap();
         assert_eq!((total, v.len()), (3, 2));
         assert_eq!((v[0].youtube_id.as_str(), v[0].plays, v[0].watched_s), ("v1", 3, 100.0));
+        let (t, v) = library_videos(&c, &f, "ch1", None, "title", 0, 10).unwrap();
+        assert_eq!((t, v.len()), (3, 3));
         let one = LibraryFilter { child: Some("a".into()), ..f.clone() };
         let (_, v) = library_videos(&c, &one, "ch1", None, "time", 0, 10).unwrap();
         assert_eq!((v[0].plays, v[0].watched_s), (2, 90.0));
