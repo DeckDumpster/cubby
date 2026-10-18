@@ -29,6 +29,7 @@ export class ParentState {
 	policies: Policy[] = $state([]);
 	review: Item[] = $state([]);
 	requests: Req[] = $state([]);
+	parents: string[] = $state([]);
 	history: Grant[] = $state([]);
 	/** The child chosen in the URL (?child=<id>); empty means the first child. */
 	historyChildParam = $state('');
@@ -70,6 +71,8 @@ export class ParentState {
 				'/api/parent/review' + (this.reviewChannel ? `?channel=${encodeURIComponent(this.reviewChannel)}` : '')
 			);
 			this.requests = await api('GET', '/api/parent/requests');
+			const parents = await api('GET', '/api/parent/parents');
+			this.parents = Array.isArray(parents) ? parents : [];
 			await this.loadHistory();
 		});
 

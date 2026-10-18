@@ -36,9 +36,7 @@ resource "cloudflare_zero_trust_access_policy" "parent" {
   decision         = "allow"
   session_duration = var.session_duration
 
-  include = [
-    { email = { email = var.parent_email } },
-  ]
+  include = [for e in var.parent_emails : { email = { email = e } }]
 }
 
 resource "cloudflare_zero_trust_access_policy" "device_bypass" {

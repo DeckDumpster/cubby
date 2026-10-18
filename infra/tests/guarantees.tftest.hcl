@@ -88,20 +88,24 @@ run "iam_policy_names_only_this_bucket" {
   }
 }
 
-run "access_allows_only_ryan" {
+run "access_allows_only_the_parents" {
   command = plan
 
   assert {
-    condition     = cloudflare_zero_trust_access_policy.parent.decision == "allow" && length(cloudflare_zero_trust_access_policy.parent.include) == 1 && one(cloudflare_zero_trust_access_policy.parent.include).email.email == "ryan@gantt.pub"
-    error_message = "parent policy must allow exactly ryan@gantt.pub"
+    condition     = cloudflare_zero_trust_access_policy.parent.decision == "allow" && length(var.parent_emails) > 0 && toset([for i in cloudflare_zero_trust_access_policy.parent.include : i.email.email]) == toset(var.parent_emails) && length(cloudflare_zero_trust_access_policy.parent.include) == length(var.parent_emails)
+    error_message = "parent policy must allow exactly the emails in var.parent_emails"
+  }
+  assert {
+    condition     = toset(var.parent_emails) == toset(["ryan@gantt.pub", "kim.parent@example.test"])
+    error_message = "the parents are Ryan and Kim"
   }
   assert {
     condition     = cloudflare_zero_trust_access_policy.device_bypass.decision == "bypass"
     error_message = "device bypass policy"
   }
   assert {
-    condition     = toset([for d in cloudflare_zero_trust_access_application.parent.destinations : d.uri]) == toset(["cubby.gantt.pub/parent", "cubby.gantt.pub/api/parent"])
-    error_message = "parent app covers /parent and /api/parent"
+    condition     = toset([for d in cloudflare_zero_trust_access_application.parent.destinations : d.uri]) == toset(["cubby.gantt.pub/parent", "cubby.gantt.pub/parent/*", "cubby.gantt.pub/api/parent"])
+    error_message = "parent app covers /parent, /parent/* and /api/parent"
   }
   assert {
     condition     = contains([for d in cloudflare_zero_trust_access_application.public.destinations : d.uri], "cubby.gantt.pub/watch") && !contains([for d in cloudflare_zero_trust_access_application.public.destinations : d.uri], "cubby.gantt.pub")

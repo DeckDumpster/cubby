@@ -103,8 +103,11 @@ mod tests {
     fn migration_rebuilds_the_index_of_an_existing_file() {
         let mut c = Connection::open_in_memory().unwrap();
         schema::migrate(&mut c, "family", &MIGRATIONS[..2]).unwrap();
-        c.execute("INSERT INTO videos(youtube_id,title) VALUES ('v1','Golden')", [])
-            .unwrap();
+        c.execute(
+            "INSERT INTO videos(youtube_id,title) VALUES ('v1','Golden')",
+            [],
+        )
+        .unwrap();
         assert!(search(&c, "golden").is_empty());
         migrate_family(&mut c).unwrap();
         assert_eq!(search(&c, "golden"), ["v1"]);

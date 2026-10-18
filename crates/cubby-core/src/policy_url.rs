@@ -59,8 +59,12 @@ pub fn resolve_url(input: &str) -> Option<Resolved> {
     };
     match host.as_str() {
         "youtu.be" => make(PolicyKind::Video, path.split('/').next()?),
-        "youtube.com" | "www.youtube.com" | "m.youtube.com" | "music.youtube.com"
-        | "youtube-nocookie.com" | "www.youtube-nocookie.com" => {
+        "youtube.com"
+        | "www.youtube.com"
+        | "m.youtube.com"
+        | "music.youtube.com"
+        | "youtube-nocookie.com"
+        | "www.youtube-nocookie.com" => {
             let mut parts = path.split('/');
             match parts.next()? {
                 "watch" => make(PolicyKind::Video, query_param(query, "v")?),
