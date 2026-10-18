@@ -83,4 +83,10 @@ else echo "==> $cfg_dir/litestream.env missing: litestream not started (needs th
 # The tunnel needs its token (deploy/tunnel-env.sh); without it, skip rather than error-loop.
 if [ -f "$cfg_dir/cloudflared.env" ]; then restart cubby-cloudflared.service
 else echo "==> $cfg_dir/cloudflared.env missing: tunnel not started (run deploy/tunnel-env.sh)"; fi
-echo "==> cubby deployed; check: curl -fsS http://127.0.0.1:8790/healthz"
+# A deploy is done when a user can walk the product, not when /healthz answers: five breaks reached
+# the operator one at a time behind a green healthz. The walk's output is part of this log.
+if ! run "$root/deploy/smoke.sh"; then
+    echo "==> deploy FAILED: the smoke walk (deploy/smoke.sh) failed; the instance is up but a user path is broken" >&2
+    exit 1
+fi
+echo "==> cubby deployed and walked; check: curl -fsS http://127.0.0.1:8790/healthz"

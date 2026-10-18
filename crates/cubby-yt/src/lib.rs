@@ -321,13 +321,25 @@ impl Transport for FixtureTransport {
 /// The real transport: HTTPS to the Data API with `key`, under a deadline.
 pub struct HttpTransport {
     key: String,
+    base: String,
     agent: ureq::Agent,
 }
 
+/// Where the Data API lives unless `CUBBY_YT_BASE_URL` says otherwise.
+pub const DEFAULT_BASE_URL: &str = "https://www.googleapis.com/youtube/v3";
+
 impl HttpTransport {
+    /// Talks to the Data API, or to `CUBBY_YT_BASE_URL` when set: the end-to-end test points the
+    /// server and worker binaries at a local fake YouTube that way.
     pub fn new(key: &str) -> Self {
+        let base = std::env::var("CUBBY_YT_BASE_URL")
+            .ok()
+            .map(|b| b.trim().trim_end_matches('/').to_string())
+            .filter(|b| !b.is_empty())
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
         HttpTransport {
             key: key.to_string(),
+            base,
             agent: ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(20))
                 .build(),
@@ -339,7 +351,7 @@ impl Transport for HttpTransport {
     fn get_json(&self, endpoint: &str, params: &[(&str, &str)]) -> Result<Value, YtError> {
         let mut req = self
             .agent
-            .get(&format!("https://www.googleapis.com/youtube/v3/{endpoint}"))
+            .get(&format!("{}/{endpoint}", self.base))
             .query("key", &self.key);
         for (k, v) in params {
             req = req.query(k, v);
