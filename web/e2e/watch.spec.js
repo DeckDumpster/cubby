@@ -23,7 +23,22 @@ const FAKE_PLAYER = () => {
 				window.__players.push(this);
 			}
 			getCurrentTime() {
-				return 12;
+				return this.t ?? 12;
+			}
+			getDuration() {
+				return 100;
+			}
+			getVideoData() {
+				return { video_id: this.vid ?? this.opts.videoId };
+			}
+			playVideo() {
+				this.played = (this.played ?? 0) + 1;
+			}
+			pauseVideo() {
+				this.paused = true;
+			}
+			seekTo(t) {
+				this.t = t;
 			}
 			destroy() {
 				this.destroyed = true;
@@ -90,7 +105,7 @@ test('the player is built only after a grant, with the privacy host and the LLD 
 	});
 	expect(opts.host).toBe('https://www.youtube-nocookie.com');
 	expect(opts.videoId).toBe('v1');
-	expect(opts.vars).toMatchObject({ autoplay: 0, rel: 0, playsinline: 1, fs: 1, iv_load_policy: 3 });
+	expect(opts.vars).toMatchObject({ autoplay: 0, rel: 0, playsinline: 1, fs: 0, iv_load_policy: 3, controls: 0, disablekb: 1 });
 });
 
 test('ENDED destroys the player and shows the end card with suggestions and the remaining budget', async ({ page }) => {
@@ -139,29 +154,55 @@ test('search shows only what the search API returns', async ({ page }) => {
 	await expect(page.getByRole('button', { name: /First video/ })).toHaveCount(0);
 });
 
-test('no pause card in a plain browser', async ({ page }) => {
+test('PAUSED hides the iframe and shows our Resume screen; Resume plays on', async ({ page }) => {
 	await setup(page);
 	await page.goto('/watch');
 	await page.getByRole('button', { name: /First video/ }).click();
 	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
 	await page.evaluate(() => window.__state(1));
-	await page.evaluate(() => window.__state(2));
+	await page.evaluate(() => {
+		window.__players[0].t = 33;
+		window.__state(2);
+	});
+	await expect(page.getByTestId('pause-card')).toBeVisible();
+	await expect(page.locator('iframe[title="fake player"]')).toBeHidden();
+	await page.screenshot({ path: 'test-results/paused.png' });
+	await page.getByTestId('resume').click();
 	await expect(page.getByTestId('pause-card')).toHaveCount(0);
+	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	const p = await page.evaluate(() => ({ t: window.__players[0].getCurrentTime(), played: window.__players[0].played }));
+	expect(p).toEqual({ t: 33, played: 1 });
 });
 
-test.describe('inside the iPad shell', () => {
-	test.use({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0) CubbyShell/1.0' });
-	test('PAUSED shows the pause card over the player', async ({ page }) => {
-		await setup(page);
-		await page.goto('/watch');
-		await page.getByRole('button', { name: /First video/ }).click();
-		await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
-		await page.evaluate(() => window.__state(1));
-		await page.evaluate(() => window.__state(2));
-		await expect(page.getByTestId('pause-card')).toBeVisible();
-		await page.getByRole('button', { name: 'Keep watching' }).click();
-		await expect(page.getByTestId('pause-card')).toHaveCount(0);
+test('a granted player shows no YouTube chrome and Cubby controls drive it', async ({ page }) => {
+	await page.setViewportSize({ width: 1024, height: 768 });
+	await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await page.evaluate(() => window.__state(1));
+	await expect(page.getByTestId('playpause')).toHaveAccessibleName('Pause');
+	await expect(page.getByTestId('clock')).toContainText('0:12 / -1:28');
+	await page.screenshot({ path: 'test-results/playing.png' });
+	await page.getByTestId('playpause').click();
+	expect(await page.evaluate(() => window.__players[0].paused)).toBe(true);
+	await page.locator('input[aria-label="seek"]').fill('60');
+	expect(await page.evaluate(() => window.__players[0].t)).toBe(60);
+	const o = await page.evaluate(() => window.__players[0].opts.playerVars);
+	expect(o.controls).toBe(0);
+});
+
+test('an embed that navigates off the granted id is destroyed and the grant ends off-list', async ({ page }) => {
+	const calls = await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await page.evaluate(() => window.__state(1));
+	await page.evaluate(() => {
+		window.__players[0].vid = 'evil';
+		window.__state(3);
 	});
+	await expect(page.getByTestId('stopped')).toBeVisible();
+	expect(await page.evaluate(() => window.__players[0].destroyed)).toBe(true);
+	expect(calls.find((c) => c.path.endsWith('/end')).body).toEqual({ reason: 'off-list' });
 });
 
 test.describe('leaving a search', () => {

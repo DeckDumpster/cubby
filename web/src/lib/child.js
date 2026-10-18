@@ -1,7 +1,7 @@
 /** Pure helpers and the API client for the child UI (`/watch`). */
 
 export const PLAYER_HOST = 'https://www.youtube-nocookie.com';
-export const PLAYER_VARS = { autoplay: 0, rel: 0, playsinline: 1, fs: 1, iv_load_policy: 3 };
+export const PLAYER_VARS = { autoplay: 0, rel: 0, playsinline: 1, fs: 0, iv_load_policy: 3, controls: 0, disablekb: 1 };
 export const BEAT_MS = 10_000;
 const TOKEN_KEY = 'cubby_token';
 
@@ -78,7 +78,7 @@ export function beatDue(lastAt, now) {
 
 /** @param {string} r */
 export function endReason(r) {
-	return r === 'ended' || r === 'stop' ? r : 'left';
+	return r === 'ended' || r === 'stop' || r === 'off-list' ? r : 'left';
 }
 
 /** Resolves the IFrame API: the injected one when present, else loaded from YouTube. */
@@ -144,4 +144,20 @@ export function parseHome(/** @type {any} */ data) {
 /** Search and suggestion payloads: `tiles`. */
 export function parseSearch(/** @type {any} */ data) {
 	return data?.tiles ?? [];
+}
+
+/** @param {number} s seconds */
+export function clock(s) {
+	const n = Math.max(0, Math.floor(Number.isFinite(s) ? s : 0));
+	return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+}
+
+/** True when the embed is showing a video other than the granted one. */
+export function offList(/** @type {any} */ player, /** @type {string} */ granted) {
+	try {
+		const id = player?.getVideoData?.()?.video_id;
+		return !!id && id !== granted;
+	} catch {
+		return false;
+	}
 }
