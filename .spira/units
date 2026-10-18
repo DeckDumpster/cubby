@@ -1,0 +1,2 @@
+# Units deploy/deploy.sh installs into the systemd user unit dir; drift.sh units accepts them.
+cubby-worker*
