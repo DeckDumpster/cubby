@@ -4,7 +4,8 @@
 //! `/auth/login` sends the browser to the provider, `/auth/callback` exchanges the code, checks
 //! the ID token (signature against the provider's JWKS, `iss`, `aud`, `exp`, `nonce`) and the
 //! required group, and opens a server-side session held in memory behind an HttpOnly cookie.
-//! `/auth/logout` ends it. A restart signs everyone out, which costs a parent one redirect.
+//! `/auth/logout` ends it and the provider's session with it (RP-initiated logout), landing on
+//! `/signed-out`, a public page that never starts a sign-in by itself. A restart signs everyone out, which costs a parent one redirect.
 //!
 //! Discovery and JWKS are fetched lazily and cached; an unknown `kid` re-fetches the JWKS, but at
 //! most once a minute, so a fabricated token cannot be used to hammer the provider.
@@ -59,6 +60,9 @@ struct Discovery {
     authorization_endpoint: String,
     token_endpoint: String,
     jwks_uri: String,
+    /// RP-initiated logout; absent when the provider has no single sign-out.
+    #[serde(default)]
+    end_session_endpoint: Option<String>,
 }
 
 struct KeyCache {
@@ -76,6 +80,8 @@ struct Pending {
 
 struct Session {
     email: String,
+    /// Handed back to the provider as `id_token_hint` when the parent signs out.
+    id_token: String,
     expires: Instant,
 }
 
@@ -301,7 +307,7 @@ impl OidcState {
         Ok(claims)
     }
 
-    fn open_session(&self, email: &str) -> String {
+    fn open_session(&self, email: &str, id_token: &str) -> String {
         let token = random_hex(32);
         let now = Instant::now();
         let mut s = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
@@ -310,6 +316,7 @@ impl OidcState {
             token.clone(),
             Session {
                 email: email.to_string(),
+                id_token: id_token.to_string(),
                 expires: now + self.cfg.session_ttl,
             },
         );
@@ -329,11 +336,13 @@ impl OidcState {
         }
     }
 
-    fn end_session(&self, token: &str) {
+    /// Drops the session and returns the ID token it was opened with.
+    fn end_session(&self, token: &str) -> Option<String> {
         self.sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(token);
+            .remove(token)
+            .map(|s| s.id_token)
     }
 
     fn cookie(&self, value: &str, max_age: u64) -> HeaderValue {
@@ -564,7 +573,7 @@ async fn callback(
             "not a parent of any family",
         ));
     }
-    let token = o.open_session(&email);
+    let token = o.open_session(&email, &tokens.id_token);
     state.count("cubby_parent_login", "ok");
     Ok(redirect(
         &pending.next,
@@ -576,8 +585,28 @@ async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Respo
     let Some(o) = state.oidc.as_ref() else {
         return redirect("/", None);
     };
-    if let Some(t) = session_token(&headers) {
-        o.end_session(&t);
-    }
-    redirect("/", Some(o.cookie("", 0)))
+    let id_token = session_token(&headers).and_then(|t| o.end_session(&t));
+    // Ending only our own session would leave the provider's, which signs the parent straight
+    // back in; so the provider's session ends too, and it returns the browser to /signed-out.
+    let signed_out = format!("{}/signed-out", o.cfg.base_url.trim_end_matches('/'));
+    let to = match o.discover().await {
+        Ok(d) => d
+            .end_session_endpoint
+            .as_deref()
+            .and_then(|e| reqwest::Url::parse(e).ok())
+            .map(|mut u| {
+                {
+                    let mut q = u.query_pairs_mut();
+                    if let Some(t) = &id_token {
+                        q.append_pair("id_token_hint", t);
+                    }
+                    q.append_pair("client_id", &o.cfg.client_id)
+                        .append_pair("post_logout_redirect_uri", &signed_out);
+                }
+                u.to_string()
+            })
+            .unwrap_or_else(|| "/signed-out".into()),
+        Err(_) => "/signed-out".into(),
+    };
+    redirect(&to, Some(o.cookie("", 0)))
 }

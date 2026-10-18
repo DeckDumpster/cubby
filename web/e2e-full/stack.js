@@ -45,16 +45,28 @@ function fakeOidc(email, kid = 'e2e-key') {
 	const jwk = { ...publicKey.export({ format: 'jwk' }), kid, alg: 'RS256', use: 'sig' };
 	const codes = new Map();
 	let n = 0;
+	// What the provider itself remembers: /authorize signs the browser in, end-session signs it out.
+	const seen = { authorizes: 0, signedIn: false };
 	const server = createServer(async (req, res) => {
 		const u = new URL(req.url, 'http://x');
 		const issuer = `http://127.0.0.1:${server.address().port}`;
 		const json = (o, status = 200) => (res.writeHead(status, { 'content-type': 'application/json' }), res.end(JSON.stringify(o)));
 		if (u.pathname === '/.well-known/openid-configuration') {
-			return json({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, jwks_uri: `${issuer}/jwks` });
+			return json({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, jwks_uri: `${issuer}/jwks`, end_session_endpoint: `${issuer}/logout` });
 		}
 		if (u.pathname === '/jwks') return json({ keys: [jwk] });
+		if (u.pathname === '/__state') return json(seen);
+		if (u.pathname === '/logout') {
+			const q = u.searchParams;
+			if (!q.get('id_token_hint') || !q.get('post_logout_redirect_uri')) return json({ error: 'invalid_request' }, 400);
+			seen.signedIn = false;
+			res.writeHead(302, { location: q.get('post_logout_redirect_uri') });
+			return res.end();
+		}
 		if (u.pathname === '/authorize') {
 			const q = u.searchParams;
+			seen.authorizes++;
+			seen.signedIn = true;
 			const code = `code-${++n}`;
 			codes.set(code, { nonce: q.get('nonce'), challenge: q.get('code_challenge') });
 			const back = new URL(q.get('redirect_uri'));

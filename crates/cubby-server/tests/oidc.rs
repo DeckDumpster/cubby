@@ -198,6 +198,11 @@ async fn logout_ends_the_session_and_clears_the_cookie() {
         .unwrap();
     let (s, headers) = e.get("/auth/logout", Some(&cookie)).await;
     assert_eq!(s, StatusCode::SEE_OTHER);
+    let to = reqwest::Url::parse(headers[header::LOCATION].to_str().unwrap()).unwrap();
+    assert_eq!(to.path(), "/logout", "ends the provider's session: {to}");
+    let q: std::collections::HashMap<_, _> = to.query_pairs().into_owned().collect();
+    assert!(q["id_token_hint"].split('.').count() == 3, "{to}");
+    assert_eq!(q["post_logout_redirect_uri"], format!("{}/signed-out", support::BASE_URL));
     let set = headers[header::SET_COOKIE].to_str().unwrap();
     assert!(
         set.starts_with("cubby_session=;") && set.contains("Max-Age=0"),

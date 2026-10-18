@@ -95,6 +95,7 @@ impl Provider {
             "authorization_endpoint": format!("{issuer}/authorize"),
             "token_endpoint": format!("{issuer}/token"),
             "jwks_uri": format!("{issuer}/jwks"),
+            "end_session_endpoint": format!("{issuer}/logout"),
         });
         let jwks = json!({"keys": [{"kty": "RSA", "kid": KID, "alg": "RS256", "use": "sig",
             "n": GOOD_N.trim(), "e": "AQAB"}]});
