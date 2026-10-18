@@ -269,6 +269,11 @@ async fn the_library_lists_groups_then_a_groups_videos_and_searches_them() {
         .await;
     assert_eq!(vids["total"], 2);
     assert_eq!(vids["videos"][0]["plays"], 0);
+    let (s, by_title) = e
+        .parent("GET", "/api/parent/library/videos?group=ch1&sort=title", None)
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(by_title["total"], 2);
     let (s, _) = e
         .parent("GET", "/api/parent/library/videos?group=ch1&sort=zz", None)
         .await;
