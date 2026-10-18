@@ -49,6 +49,10 @@ fi
 # The worker's keys (CUBBY_YT_API_KEY, CUBBY_OTLP_ENDPOINT) are all optional, but podman --env-file
 # exits 125 on a missing file, so the timer would fail every firing. Create it empty.
 [ -e "$cfg_dir/worker.env" ] || install -m 0600 /dev/null "$cfg_dir/worker.env"
+# The server ingests a link's metadata when a parent allows it, so it needs the worker's API key too.
+if ! grep -q '^CUBBY_YT_API_KEY=' "$cfg_dir/server.env" && grep -q '^CUBBY_YT_API_KEY=' "$cfg_dir/worker.env"; then
+    grep '^CUBBY_YT_API_KEY=' "$cfg_dir/worker.env" >> "$cfg_dir/server.env"
+fi
 
 # Restart a unit; on failure print podman's own error (not a pointer to journalctl) and exit non-zero.
 restart() {

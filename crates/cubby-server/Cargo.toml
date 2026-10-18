@@ -19,6 +19,7 @@ cubby-otel = { path = "../cubby-otel" }
 cubby-core = { path = "../cubby-core" }
 cubby-db = { path = "../cubby-db" }
 cubby-yt = { path = "../cubby-yt" }
+cubby-worker = { path = "../cubby-worker" }
 
 [dev-dependencies]
 tower.workspace = true

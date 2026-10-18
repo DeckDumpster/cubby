@@ -65,6 +65,10 @@ async fn jwks_server() -> String {
 }
 
 async fn env_with(access: bool, otlp: &str) -> Env {
+    env_full(access, otlp, None).await
+}
+
+async fn env_full(access: bool, otlp: &str, ingest: Option<cubby_server::Ingest>) -> Env {
     let dir = temp_dir();
     let jwks = if access {
         jwks_server().await
@@ -85,7 +89,7 @@ async fn env_with(access: bool, otlp: &str) -> Env {
     let mut registry = Registry::open(&data).unwrap();
     let family_id = registry.create_family(PARENT).unwrap().id;
     drop(registry);
-    let router = app(&cfg).unwrap();
+    let router = cubby_server::app_with_ingest(&cfg, ingest).unwrap();
     Env {
         router,
         dir,
@@ -451,4 +455,64 @@ async fn the_parent_api_needs_a_parent() {
         .body(Body::empty())
         .unwrap();
     assert_eq!(e.call(r).await.0, StatusCode::UNAUTHORIZED);
+}
+
+fn fixture_ingest() -> cubby_server::Ingest {
+    std::sync::Arc::new(|conn: &Connection| {
+        let mut t = cubby_yt::FixtureTransport::default();
+        t.add(
+            "videos",
+            &[
+                ("part", "snippet,contentDetails,status"),
+                ("id", "yebNIHKAC4A"),
+            ],
+            json!({"items": [{"id": "yebNIHKAC4A",
+                "snippet": {"title": "Allowed now", "channelId": "UCx", "channelTitle": "Chan",
+                    "tags": [], "thumbnails": {}},
+                "contentDetails": {"duration": "PT4M13S"},
+                "status": {"privacyStatus": "public", "madeForKids": true}}]}),
+        );
+        cubby_worker::run_pass(conn, &t, now(), None);
+    })
+}
+
+/// What the child's home and search read from: the `playable` set for `child`.
+fn playable(e: &Env, child: &str) -> usize {
+    cubby_db::browse::playable_videos(&e.family(), child)
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+async fn an_allowed_video_reaches_the_child_without_a_worker_tick() {
+    let e = env_full(true, "", Some(fixture_ingest())).await;
+    let (child, _) = e.child_with_device().await;
+    assert_eq!(playable(&e, &child), 0);
+    let (s, p) = e
+        .parent(
+            "POST",
+            "/api/parent/policies",
+            Some(json!({"url": "https://youtu.be/yebNIHKAC4A"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    assert_eq!(playable(&e, &child), 1, "the child sees it at once");
+    let (_, pols) = e.parent("GET", "/api/parent/policies", None).await;
+    assert_eq!(pols[0]["pending"], false);
+    assert_eq!(pols[0]["title"], "Allowed now");
+}
+
+#[tokio::test]
+async fn without_ingest_an_allowed_video_is_pending_until_the_worker_runs() {
+    let e = env().await;
+    let (s, _) = e
+        .parent(
+            "POST",
+            "/api/parent/policies",
+            Some(json!({"url": "https://youtu.be/yebNIHKAC4A"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, pols) = e.parent("GET", "/api/parent/policies", None).await;
+    assert_eq!(pols[0]["pending"], true);
 }

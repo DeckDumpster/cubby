@@ -16,7 +16,7 @@
 			daily_windows: [string, string][];
 		};
 	};
-	type Policy = { id: string; kind: string; youtube_id: string; child_id: string | null; title: string };
+	type Policy = { id: string; kind: string; youtube_id: string; child_id: string | null; title: string; pending?: boolean };
 	type Item = { youtube_id: string; title: string; channel_id: string | null; channel_title: string; policy_kind: string; policy_youtube_id: string };
 	type Req = { id: string; child_name: string; kind: string; title: string; channel_title: string; youtube_id: string };
 	type Grant = { id: string; title: string; youtube_id: string; granted_at: number; watched_s: number; charge: number; end_reason: string | null };
@@ -137,7 +137,7 @@
 		<ul class="list">
 			{#each policies as p (p.id)}
 				<li>
-					<span class="grow"><b class="pill">{p.kind}</b> {p.title || p.youtube_id} <small>— {childName(p.child_id)}</small></span>
+					<span class="grow"><b class="pill">{p.kind}</b> {p.title || p.youtube_id}{#if p.pending} <b class="pill">pending</b>{/if} <small>— {childName(p.child_id)}</small></span>
 					<button class="danger" onclick={() => act('DELETE', `/api/parent/policies/${p.id}`)}>Remove</button>
 				</li>
 			{:else}<li class="empty">Nothing is allowed yet, so children see nothing.</li>{/each}
