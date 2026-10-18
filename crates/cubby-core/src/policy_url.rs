@@ -59,11 +59,13 @@ pub fn resolve_url(input: &str) -> Option<Resolved> {
     };
     match host.as_str() {
         "youtu.be" => make(PolicyKind::Video, path.split('/').next()?),
-        "youtube.com" | "www.youtube.com" | "m.youtube.com" | "music.youtube.com" => {
+        "youtube.com" | "www.youtube.com" | "m.youtube.com" | "music.youtube.com"
+        | "youtube-nocookie.com" | "www.youtube-nocookie.com" => {
             let mut parts = path.split('/');
             match parts.next()? {
                 "watch" => make(PolicyKind::Video, query_param(query, "v")?),
                 "playlist" => make(PolicyKind::Playlist, query_param(query, "list")?),
+                "shorts" | "live" | "embed" | "v" => make(PolicyKind::Video, parts.next()?),
                 "channel" => make(PolicyKind::Channel, parts.next()?),
                 h if h.starts_with('@') && id_ok(&h[1..]) => Some(Resolved {
                     kind: PolicyKind::Channel,
@@ -98,6 +100,35 @@ mod tests {
             r("https://youtu.be/dQw4w9WgXcQ?si=abc"),
             Some((PolicyKind::Video, "dQw4w9WgXcQ".into()))
         );
+    }
+
+    #[test]
+    fn shorts_live_embed_and_v_paths_are_videos() {
+        for u in [
+            "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+            "https://m.youtube.com/shorts/dQw4w9WgXcQ?si=abc",
+            "https://youtube.com/shorts/dQw4w9WgXcQ/",
+            "https://www.youtube.com/live/dQw4w9WgXcQ?si=abc&t=30",
+            "https://www.youtube.com/embed/dQw4w9WgXcQ?start=5",
+            "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+            "https://youtube-nocookie.com/embed/dQw4w9WgXcQ",
+            "https://www.youtube.com/v/dQw4w9WgXcQ",
+            "https://m.youtube.com/watch?v=dQw4w9WgXcQ&si=x&t=10s",
+            "https://youtu.be/dQw4w9WgXcQ?t=10",
+        ] {
+            assert_eq!(r(u), Some((PolicyKind::Video, "dQw4w9WgXcQ".into())), "{u}");
+        }
+    }
+
+    #[test]
+    fn a_form_without_an_id_does_not_resolve() {
+        for bad in [
+            "https://www.youtube.com/shorts/",
+            "https://www.youtube.com/live",
+            "https://www.youtube.com/embed/",
+        ] {
+            assert_eq!(r(bad), None, "{bad}");
+        }
     }
 
     #[test]
