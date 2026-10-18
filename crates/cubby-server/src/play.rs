@@ -316,6 +316,17 @@ struct EndBody {
     reason: String,
 }
 
+/// What the child has left right now, in the shape `play` and `beat` report it.
+pub(crate) fn remaining_json_for(
+    conn: &Connection,
+    child: &str,
+    now: i64,
+) -> rusqlite::Result<Value> {
+    let b = load_budget(conn, child)?;
+    let u = usage(conn, child, &b, now)?;
+    Ok(remaining_json(budget::remaining(&b, u)))
+}
+
 fn remaining_json(r: Remaining) -> Value {
     json!({"videos": r.videos, "minutes": r.minutes})
 }
