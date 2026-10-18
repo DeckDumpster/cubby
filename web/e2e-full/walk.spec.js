@@ -71,7 +71,7 @@ test.describe('hermetic stack', () => {
 		});
 
 		await test.step('adds a child and gets a pairing code', async () => {
-			await parent.getByRole('button', { name: /^Children/ }).click();
+			await parent.getByRole('link', { name: /^Children/ }).click();
 			await parent.getByPlaceholder('Name').fill('Maya');
 			await parent.getByRole('button', { name: 'Add', exact: true }).click();
 			await expect(parent.getByText('Maya').first()).toBeVisible();
@@ -82,7 +82,7 @@ test.describe('hermetic stack', () => {
 		});
 
 		await test.step('allows one video', async () => {
-			await parent.getByRole('button', { name: /^Allow-list/ }).click();
+			await parent.getByRole('link', { name: /^Allow-list/ }).click();
 			await parent.getByPlaceholder('Paste a YouTube link').fill(`https://www.youtube.com/watch?v=${VOLCANO}`);
 			await parent.getByRole('button', { name: 'Check' }).click();
 			await parent.getByRole('button', { name: 'Allow', exact: true }).click();
