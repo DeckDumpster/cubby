@@ -1,0 +1,58 @@
+:root {
+	--bg: #f4f6fb;
+	--surface: #ffffff;
+	--surface-2: #eef1f8;
+	--text: #1b2133;
+	--muted: #5d667c;
+	--border: #d9deea;
+	--accent: #4f46e5;
+	--accent-text: #ffffff;
+	--danger: #c62828;
+	--danger-bg: #fdecea;
+	--ok: #2e7d32;
+	--radius: 12px;
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.5rem;
+	--touch: 44px;
+	--font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+	--mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	--shadow: 0 1px 2px rgb(20 25 50 / 0.06), 0 2px 8px rgb(20 25 50 / 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0f1320;
+		--surface: #181d2e;
+		--surface-2: #222840;
+		--text: #e8ebf5;
+		--muted: #9aa3bd;
+		--border: #2d3550;
+		--accent: #8b86ff;
+		--accent-text: #10122a;
+		--danger: #ff8a80;
+		--danger-bg: #3a1c20;
+		--ok: #81c784;
+		--shadow: none;
+	}
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+/* Only the parent UI adopts the tokens for now; /watch keeps its own look until its own bead. */
+body:has(.parent) {
+	color-scheme: light dark;
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font);
+	font-size: 1rem;
+	line-height: 1.5;
+	-webkit-text-size-adjust: 100%;
+}

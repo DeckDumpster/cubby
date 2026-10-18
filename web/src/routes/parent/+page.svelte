@@ -106,95 +106,104 @@
 	const when = (t: number) => new Date(t * 1000).toLocaleString();
 </script>
 
-<h1>Cubby — parent</h1>
-<nav>
+<div class="parent">
+<header class="bar">
+	<h1><span class="logo" aria-hidden="true">C</span> Cubby <small>parent</small></h1>
+</header>
+<nav class="tabs" aria-label="Sections">
 	{#each [['allow', 'Allow-list'], ['review', 'Added by your policies'], ['requests', `Requests (${requests.length})`], ['children', 'Children'], ['history', 'History']] as [key, label] (key)}
-		<button class:active={tab === key} onclick={() => (tab = key)}>{label}</button>
+		<button class="tab" class:active={tab === key} aria-current={tab === key ? 'page' : undefined} onclick={() => (tab = key)}>{label}</button>
 	{/each}
 </nav>
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 
 {#if tab === 'allow'}
-	<section>
+	<section class="panel">
 		<h2>Allow a video, channel or playlist</h2>
+		<div class="form">
 		<input placeholder="Paste a YouTube link" bind:value={url} oninput={() => (preview = null)} />
 		<select bind:value={scope}>
 			<option value="">All children</option>
 			{#each children as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
 		</select>
-		<button onclick={doPreview} disabled={!url}>Check</button>
+		<button class="primary" onclick={doPreview} disabled={!url}>Check</button>
+		</div>
 		{#if preview}
-			<div class="card">
-				<b>{preview.kind}</b> <code>{preview.youtube_id}</code> for {childName(scope || null)}
-				<button onclick={allow}>Allow</button>
+			<div class="card preview">
+				<span><b class="pill">{preview.kind}</b> <code>{preview.youtube_id}</code> for {childName(scope || null)}</span>
+				<button class="primary" onclick={allow}>Allow</button>
 			</div>
 		{/if}
-		<ul>
+		<ul class="list">
 			{#each policies as p (p.id)}
 				<li>
-					<b>{p.kind}</b> {p.title || p.youtube_id} — {childName(p.child_id)}
-					<button onclick={() => act('DELETE', `/api/parent/policies/${p.id}`)}>Remove</button>
+					<span class="grow"><b class="pill">{p.kind}</b> {p.title || p.youtube_id} <small>— {childName(p.child_id)}</small></span>
+					<button class="danger" onclick={() => act('DELETE', `/api/parent/policies/${p.id}`)}>Remove</button>
 				</li>
-			{:else}<li>Nothing is allowed yet, so children see nothing.</li>{/each}
+			{:else}<li class="empty">Nothing is allowed yet, so children see nothing.</li>{/each}
 		</ul>
 	</section>
 {:else if tab === 'review'}
-	<section>
+	<section class="panel">
 		<h2>Added by your policies</h2>
 		<select bind:value={reviewChannel} onchange={load}>
 			<option value="">All channels</option>
 			{#each channels as [id, title] (id)}<option value={id}>{title}</option>{/each}
 		</select>
-		<ul>
+		<ul class="list">
 			{#each review as i (i.youtube_id + i.policy_youtube_id)}
 				<li>
-					{i.title} <small>({i.channel_title}, via {i.policy_kind} {i.policy_youtube_id})</small>
-					<button onclick={() => act('POST', `/api/parent/videos/${i.youtube_id}/approve`, {})}>Approve</button>
-					<button onclick={() => act('POST', `/api/parent/videos/${i.youtube_id}/block`, {})}>Block</button>
+					<span class="grow">{i.title} <small>({i.channel_title}, via {i.policy_kind} {i.policy_youtube_id})</small></span>
+					<span class="actions">
+					<button class="primary" onclick={() => act('POST', `/api/parent/videos/${i.youtube_id}/approve`, {})}>Approve</button>
+					<button class="danger" onclick={() => act('POST', `/api/parent/videos/${i.youtube_id}/block`, {})}>Block</button>
+					</span>
 				</li>
-			{:else}<li>Nothing waiting for review.</li>{/each}
+			{:else}<li class="empty">Nothing waiting for review.</li>{/each}
 		</ul>
 	</section>
 {:else if tab === 'requests'}
-	<section>
+	<section class="panel">
 		<h2>Requests</h2>
-		<ul>
+		<ul class="list">
 			{#each requests as r (r.id)}
 				<li>
-					<b>{r.child_name}</b> {requestLabel(r.kind)}: {r.title || r.youtube_id} <small>({r.channel_title})</small>
-					<button onclick={() => act('POST', `/api/parent/requests/${r.id}/resolve`, { action: 'allow-channel' })}>Allow channel</button>
+					<span class="grow"><b>{r.child_name}</b> {requestLabel(r.kind)}: {r.title || r.youtube_id} <small>({r.channel_title})</small></span>
+					<span class="actions">
+					<button class="primary" onclick={() => act('POST', `/api/parent/requests/${r.id}/resolve`, { action: 'allow-channel' })}>Allow channel</button>
 					<button onclick={() => act('POST', `/api/parent/requests/${r.id}/resolve`, { action: 'allow-more', n: 5 })}>Allow 5 more</button>
-					<button onclick={() => act('POST', `/api/parent/requests/${r.id}/resolve`, { action: 'dismiss' })}>Dismiss</button>
+					<button class="danger" onclick={() => act('POST', `/api/parent/requests/${r.id}/resolve`, { action: 'dismiss' })}>Dismiss</button>
+					</span>
 				</li>
-			{:else}<li>No requests.</li>{/each}
+			{:else}<li class="empty">No requests.</li>{/each}
 		</ul>
 	</section>
 {:else if tab === 'children'}
-	<section>
+	<section class="panel">
 		<h2>Children</h2>
 		{#each children as c (c.id)}
 			<div class="card">
-				<h3>{c.avatar} {c.name} <small>{c.tz}</small></h3>
+				<h3><span class="avatar">{c.avatar}</span> {c.name} <small>{c.tz}</small></h3>
 				{#if forms[c.id]}
 					<label>Videos per day <input bind:value={forms[c.id].videos} /></label>
 					<label>Minutes per day <input bind:value={forms[c.id].minutes} /></label>
 					<label>Windows <input placeholder="07:00-19:00" bind:value={forms[c.id].windows} /></label>
-					<label><input type="checkbox" bind:checked={forms[c.id].cutoff} /> Stop a video mid-play when the budget runs out</label>
-					<button onclick={() => saveBudget(c.id)}>Save budget</button>
+					<label class="check"><input type="checkbox" bind:checked={forms[c.id].cutoff} /> Stop a video mid-play when the budget runs out</label>
+					<button class="primary" onclick={() => saveBudget(c.id)}>Save budget</button>
 				{/if}
 				<h4>Devices</h4>
-				<ul>
+				<ul class="list">
 					{#each c.devices as d (d.id)}
 						<li>
-							{d.label || 'device'}
-							{#if d.revoked_at}(revoked){:else}
-								<button onclick={() => act('POST', `/api/parent/devices/${d.id}/revoke`)}>Revoke</button>
+							<span class="grow">{d.label || 'device'}</span>
+							{#if d.revoked_at}<small>(revoked)</small>{:else}
+								<button class="danger" onclick={() => act('POST', `/api/parent/devices/${d.id}/revoke`)}>Revoke</button>
 							{/if}
 						</li>
 					{/each}
 				</ul>
 				<button onclick={() => pair(c.id)}>Pair a device</button>
-				{#if pairing?.child === c.id}<p class="code">{pairing.code}</p>{/if}
+				{#if pairing?.child === c.id}<p class="code" aria-label="Pairing code">{pairing.code}</p>{/if}
 			</div>
 		{/each}
 		<div class="card">
@@ -202,16 +211,16 @@
 			<input placeholder="Name" bind:value={newChild.name} />
 			<input placeholder="Avatar" bind:value={newChild.avatar} />
 			<input placeholder="Time zone" bind:value={newChild.tz} />
-			<button onclick={addChild} disabled={!newChild.name}>Add</button>
+			<button class="primary" onclick={addChild} disabled={!newChild.name}>Add</button>
 		</div>
 	</section>
 {:else}
-	<section>
+	<section class="panel">
 		<h2>History</h2>
 		<select bind:value={historyChild} onchange={load}>
 			{#each children as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
 		</select>
-		<table>
+		<div class="scroll"><table>
 			<thead><tr><th>When</th><th>Video</th><th>Watched</th><th>Charge</th><th>Ended</th></tr></thead>
 			<tbody>
 				{#each history as g (g.id)}
@@ -221,15 +230,66 @@
 					</tr>
 				{/each}
 			</tbody>
-		</table>
+		</table></div>
 	</section>
 {/if}
+</div>
 
 <style>
-	nav button.active { font-weight: bold; }
-	.error { color: #b00020; }
-	.card { border: 1px solid #ccc; border-radius: 8px; padding: 0.75rem; margin: 0.75rem 0; }
-	.code { font-size: 3rem; letter-spacing: 0.3em; font-family: monospace; }
-	label { display: block; }
-	small { color: #666; }
+	.parent { max-width: 56rem; margin: 0 auto; padding: 0 var(--space-4) var(--space-5); }
+	.bar { padding: var(--space-4) 0 var(--space-2); }
+	h1 { display: flex; align-items: center; gap: var(--space-2); font-size: 1.4rem; margin: 0; letter-spacing: -0.01em; }
+	h1 small { font-size: 0.85rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; }
+	.logo { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 9px; background: var(--accent); color: var(--accent-text); font-weight: 800; }
+	h2 { font-size: 1.15rem; margin: var(--space-4) 0 var(--space-3); }
+	h3 { font-size: 1.05rem; margin: 0 0 var(--space-3); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+	h4 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: var(--space-4) 0 var(--space-2); }
+	small { color: var(--muted); }
+	code { font-family: var(--mono); font-size: 0.85em; background: var(--surface-2); padding: 0.1em 0.4em; border-radius: 6px; }
+
+	.tabs { display: flex; gap: var(--space-1); overflow-x: auto; border-bottom: 1px solid var(--border); margin: 0 calc(var(--space-4) * -1); padding: 0 var(--space-4); scrollbar-width: none; position: sticky; top: 0; background: var(--bg); z-index: 1; }
+	.tab { flex: none; background: none; border: 0; border-bottom: 3px solid transparent; border-radius: 0; color: var(--muted); font-weight: 600; padding: 0 var(--space-3); }
+	.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+	button, select, input:not([type='checkbox']) { font: inherit; color: var(--text); min-height: var(--touch); border-radius: 10px; border: 1px solid var(--border); background: var(--surface); padding: 0 var(--space-3); }
+	input:not([type='checkbox']), select { width: 100%; }
+	input::placeholder { color: var(--muted); }
+	button { cursor: pointer; font-weight: 600; background: var(--surface-2); }
+	button:disabled { opacity: 0.5; cursor: not-allowed; }
+	button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+	button.danger { color: var(--danger); background: transparent; }
+	:is(button, select, input):focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+	input[type='checkbox'] { width: 1.4rem; height: 1.4rem; accent-color: var(--accent); flex: none; }
+
+	label { display: grid; gap: var(--space-1); margin-bottom: var(--space-3); font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+	label.check { display: flex; align-items: center; gap: var(--space-3); min-height: var(--touch); font-weight: 400; color: var(--text); }
+	.form { display: grid; gap: var(--space-2); margin-bottom: var(--space-4); }
+
+	.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--space-4); margin: var(--space-3) 0; }
+	.card.preview { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; justify-content: space-between; }
+	.avatar { font-size: 1.5rem; }
+	.pill { display: inline-block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.1em 0.55em; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+
+	.list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+	.list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); }
+	.list li.empty { color: var(--muted); justify-content: center; padding: var(--space-5) var(--space-3); border-style: dashed; background: transparent; text-align: center; }
+	.card .list li { background: var(--surface-2); border: 0; }
+	.grow { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+	.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+	.error { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); border-radius: 10px; padding: var(--space-3); margin: var(--space-3) 0; }
+	.code { font-size: 2.5rem; letter-spacing: 0.3em; font-family: var(--mono); text-align: center; background: var(--surface-2); border-radius: 10px; padding: var(--space-3); margin: var(--space-3) 0 0; }
+
+	.scroll { overflow-x: auto; margin-top: var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+	table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+	th, td { text-align: left; padding: var(--space-3); border-bottom: 1px solid var(--border); vertical-align: top; }
+	td:nth-child(2) { min-width: 10rem; }
+	th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); white-space: nowrap; }
+	tbody tr:last-child td { border-bottom: 0; }
+
+	@media (min-width: 640px) {
+		.form { grid-template-columns: 1fr 12rem auto; }
+		.parent { padding: 0 var(--space-5) var(--space-5); }
+		.tabs { margin: 0 calc(var(--space-5) * -1); padding: 0 var(--space-5); }
+	}
 </style>
