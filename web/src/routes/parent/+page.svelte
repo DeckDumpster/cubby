@@ -33,8 +33,8 @@
 
 	let url = $state('');
 	let addError = $state('');
+	let adding = $state(false);
 	let scope = $state('');
-	let preview: { kind: string; youtube_id: string } | null = $state(null);
 	let pairing: { child: string; code: string } | null = $state(null);
 	let newChild = $state({ name: '', avatar: '', tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
 	let forms: Record<string, { videos: string; minutes: string; windows: string; cutoff: boolean }> = $state({});
@@ -73,25 +73,19 @@
 	const childName = (id: string | null) => (id ? (children.find((c) => c.id === id)?.name ?? '?') : 'everyone');
 	const channels = $derived([...new Map(review.filter((i) => i.channel_id).map((i) => [i.channel_id!, i.channel_title])).entries()]);
 
-	const doPreview = async () => {
-		addError = '';
-		try {
-			preview = await api('POST', '/api/parent/policies/preview', { url });
-		} catch (e) {
-			preview = null;
-			addError = e instanceof Error ? e.message : String(e);
-		}
-	};
 	const allow = async () => {
+		if (!url.trim() || adding) return;
+		adding = true;
 		addError = '';
 		try {
 			await api('POST', '/api/parent/policies', { url, child_id: scope || null });
 		} catch (e) {
 			addError = e instanceof Error ? e.message : String(e);
 			return;
+		} finally {
+			adding = false;
 		}
 		url = '';
-		preview = null;
 		await load();
 	};
 	const act = (method: string, path: string, body?: unknown) =>
@@ -134,22 +128,16 @@
 {#if tab === 'allow'}
 	<section class="panel">
 		<h2>Allow a video, channel or playlist</h2>
-		<div class="form">
-		<input placeholder="Paste a YouTube link" bind:value={url} oninput={() => { preview = null; addError = ''; }} aria-invalid={addError ? 'true' : undefined} />
+		<form class="form" onsubmit={(e) => { e.preventDefault(); allow(); }}>
+		<input placeholder="Paste a YouTube link" bind:value={url} oninput={() => { addError = ''; }} aria-invalid={addError ? 'true' : undefined} />
 		<select bind:value={scope}>
 			<option value="">All children</option>
 			{#each children as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
 		</select>
-		<button class="primary" onclick={doPreview} disabled={!url}>Check</button>
-		</div>
+		<button class="primary" type="submit" disabled={!url.trim() || adding}>Add</button>
+		</form>
 		{#if addError}
 			<p class="error" role="alert">{addError} <button onclick={() => (addError = '')}>Dismiss</button></p>
-		{/if}
-		{#if preview}
-			<div class="card preview">
-				<span><b class="pill">{preview.kind}</b> <code>{preview.youtube_id}</code> for {childName(scope || null)}</span>
-				<button class="primary" onclick={allow}>Allow</button>
-			</div>
 		{/if}
 		<ul class="list">
 			{#each policies as p (p.id)}
