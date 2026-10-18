@@ -1,30 +1,11 @@
 #!/usr/bin/env bash
-# Offline checks of the cutover artefacts: Access policy split, tunnel route, Litestream config,
+# Offline checks of the cutover artefacts: Litestream config,
 # unit files and deploy idempotence. No network, no podman. Runs from deploy/ci.sh.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# --- Access: parent is gated, child and static are bypass, one app per path set.
-acc=cloudflare/access.json
-# node, not jq: ci.sh guarantees node on PATH, the testenv image has no jq.
-node - "$acc" <<'JS' || fail "access policy split"
-const a = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
-const bad = (m) => { console.error("access: " + m); process.exit(1); };
-if (a.hostname !== "cubby.gantt.pub") bad("hostname");
-const app = (n) => a.apps.find((x) => x.name === n) || bad("missing app " + n);
-const parent = app("cubby-parent"), pub = app("cubby-public");
-if (JSON.stringify([...parent.paths].sort()) !== JSON.stringify(["/api/parent*", "/parent*"])) bad("parent paths");
-if (parent.policy.decision !== "allow" || parent.policy.emails.length !== 1) bad("parent policy must allow exactly one email");
-if (!pub.paths.includes("/watch*") || !pub.paths.includes("/api/child*")) bad("child paths bypass");
-if (pub.policy.decision !== "bypass") bad("public bypass");
-if (a.apps.some((x) => x.paths.some((p) => p === "/*" || p === "/"))) bad("no catch-all app");
-JS
-
-# --- Tunnel: ingress to loopback 8790 with a 404 catch-all.
-grep -q 'hostname: cubby.gantt.pub' cloudflare/tunnel.yml || fail "tunnel hostname"
-grep -q 'service: http://127.0.0.1:8790' cloudflare/tunnel.yml || fail "tunnel service"
-tail -n1 cloudflare/tunnel.yml | grep -q 'http_status:404' || fail "tunnel catch-all"
+# Access policy split and tunnel ingress are Terraform now: infra/tests/guarantees.tftest.hcl.
 
 # --- Litestream: directory mode over the data volume, bucket cubby-backups, top-level retention.
 grep -q 'dir: /data' litestream.yml || fail "litestream dir"

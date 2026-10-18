@@ -23,8 +23,24 @@ cargo test --workspace
 echo "==> deploy artefacts"
 bash deploy/test-deploy.sh
 
-echo "==> infra: npm ci, check, template test, cdk synth"
-(cd infra && { npm ci || { sleep 5; npm ci; }; } && npm run check && npm test && npx cdk synth --quiet)
+echo "==> infra: terraform fmt, validate, test"
+tf_version=1.13.3
+tf_sha256=71fc43d92ea09907be5d416d2405a6a9c2d1ceaed633f5e175c0af26e8c4b365
+if ! command -v terraform >/dev/null 2>&1; then
+    dir="$(mktemp -d)"
+    curl -fsSL -o "$dir/tf.zip" "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_linux_amd64.zip"
+    echo "${tf_sha256}  $dir/tf.zip" | sha256sum -c -
+    python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extract("terraform", sys.argv[2])' "$dir/tf.zip" "$dir"
+    chmod +x "$dir/terraform"
+    export PATH="$dir:$PATH"
+fi
+(
+    cd infra
+    terraform fmt -check -recursive
+    { terraform init -backend=false -input=false || { sleep 5; terraform init -backend=false -input=false; }; }
+    terraform validate
+    terraform test
+)
 
 cd web
 echo "==> npm ci"
