@@ -39,6 +39,11 @@ private/versioned/retained, the IAM policy names only this bucket, and Access al
       -var cloudflare_account_id=<id> -var cloudflare_zone_id=<gantt.pub zone id>
     terraform apply cubby.tfplan
 
+The first plan adopts the seven existing Fastmail records in `imports.tf` instead of creating them.
+Expect: `Plan: 7 to import, N to add (Cubby record, tunnel, Access), 3 to change (DKIM proxied->false), 0 to destroy`
+(the three DKIM CNAMEs go proxied true -> false; MX and TXT show no change). Anything else, stop.
+Once applied, `imports.tf` may be deleted.
+
 Never applied from CI. Note: the `terraform-deploy` role is scoped to `spira-*` names; `cubby-backups`,
 `cubby-litestream` and `cubby/litestream` need the role widened first.
 
