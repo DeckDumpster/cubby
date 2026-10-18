@@ -156,3 +156,43 @@ async fn metrics_reach_a_fixture_otlp_endpoint_by_route_status_and_auth_reason()
     assert_eq!(reqs.0[0].label("status"), Some("401"));
     assert_eq!(reqs.1[0].label("outcome"), Some("missing"));
 }
+
+async fn headers_of(path: &str) -> (StatusCode, axum::http::HeaderMap) {
+    let res = app(&config(&web_dir(), ""))
+        .unwrap()
+        .oneshot(Request::get(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    (res.status(), res.headers().clone())
+}
+
+#[tokio::test]
+async fn api_responses_are_never_cacheable_whatever_their_status() {
+    for path in ["/api/child/home", "/api/parent/anything", "/api/nope"] {
+        let (status, h) = headers_of(path).await;
+        assert!(status.is_client_error(), "{path} {status}");
+        assert_eq!(h["cache-control"], "no-store", "{path}");
+    }
+}
+
+#[tokio::test]
+async fn the_spa_shell_is_revalidated_every_load() {
+    for path in ["/", "/index.html", "/watch/deep/link"] {
+        let (status, h) = headers_of(path).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert_eq!(h["cache-control"], "no-cache", "{path}");
+    }
+}
+
+#[tokio::test]
+async fn other_static_assets_keep_their_own_caching() {
+    let dir = web_dir();
+    std::fs::create_dir_all(dir.join("_app")).unwrap();
+    std::fs::write(dir.join("_app/x.js"), "1").unwrap();
+    let res = app(&config(&dir, ""))
+        .unwrap()
+        .oneshot(Request::get("/_app/x.js").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert!(res.headers().get("cache-control").is_none());
+}

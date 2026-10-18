@@ -66,6 +66,7 @@ export function requestLabel(kind) {
 export async function api(method, path, body) {
 	const res = await fetch(path, {
 		method,
+		cache: 'no-store',
 		headers: body === undefined ? {} : { 'content-type': 'application/json' },
 		body: body === undefined ? undefined : JSON.stringify(body)
 	});
