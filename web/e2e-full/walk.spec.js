@@ -84,8 +84,7 @@ test.describe('hermetic stack', () => {
 		await test.step('allows one video', async () => {
 			await parent.getByRole('link', { name: /^Allow-list/ }).click();
 			await parent.getByPlaceholder('Paste a YouTube link').fill(`https://www.youtube.com/watch?v=${VOLCANO}`);
-			await parent.getByRole('button', { name: 'Check' }).click();
-			await parent.getByRole('button', { name: 'Allow', exact: true }).click();
+			await parent.getByRole('button', { name: 'Add', exact: true }).click();
 			await expect(parent.locator('ul.list li').filter({ hasText: VIDEOS[VOLCANO].title })).toBeVisible();
 			await expect(parent.getByRole('alert')).toHaveCount(0);
 		});
@@ -129,7 +128,39 @@ test.describe('hermetic stack', () => {
 			expect(res.status()).toBe(200);
 			expect((await res.json()).grant_id, 'no play grant was created').toBeTruthy();
 			await expect(child.getByRole('heading', { name: VIDEOS[VOLCANO].title })).toBeVisible();
-			await expect(child.locator('iframe[title="fake player"]')).toBeVisible();
+			await expect(child.locator('iframe[title="fake player"]')).toBeAttached();
+		});
+
+		await test.step('the grown-up control unpairs the device and returns to pairing', async () => {
+			await child.goto('/watch');
+			child.once('dialog', (d) => d.accept());
+			await child.getByRole('button', { name: /unpair this device/ }).click();
+			await expect(child.getByLabel('pairing code')).toBeVisible();
+			expect(await child.evaluate(() => localStorage.getItem('cubby_token'))).toBeNull();
+		});
+
+		await test.step('the parent has a Sign out link to the Access logout', async () => {
+			await expect(parent.getByRole('link', { name: 'Sign out' })).toHaveAttribute('href', '/cdn-cgi/access/logout');
+		});
+
+		await test.step('revoking a paired device sends its /watch back to pairing', async () => {
+			await parent.getByRole('link', { name: /^Children/ }).click();
+			await parent.getByRole('button', { name: 'Pair a device' }).click();
+			const shown = parent.getByLabel('Pairing code');
+			await expect(shown).toHaveText(/\S+/);
+			await expect(shown).not.toHaveText(code);
+			const fresh = (await shown.textContent()).trim();
+			await child.goto('/watch');
+			await child.getByLabel('pairing code').fill(fresh);
+			await child.getByRole('button', { name: 'Go' }).click();
+			await expect(child.getByLabel('search')).toBeVisible();
+			await parent.reload();
+			const revoke = parent.getByRole('button', { name: 'Revoke' });
+			await expect(revoke.first()).toBeVisible();
+			for (let n = await revoke.count(); n > 0; n--) await revoke.first().click();
+			await expect(revoke).toHaveCount(0);
+			await child.goto('/watch');
+			await expect(child.getByLabel('pairing code')).toBeVisible();
 		});
 	});
 });
