@@ -27,10 +27,9 @@ variable "origin" {
   default = "http://127.0.0.1:8790"
 }
 
-variable "parent_emails" {
-  type        = list(string)
-  description = "Every parent allowed through Access to /parent; keep in step with `cubby-server family add-parent`."
-  default     = ["ryan@gantt.pub", "kim.parent@example.test"]
+variable "pocket_id_login_method_id" {
+  type        = string
+  description = "Access identity provider id of the Pocket ID login method, from the identity repo's output. The parent app allows only this method."
 }
 
 variable "session_duration" {

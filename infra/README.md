@@ -27,7 +27,7 @@ Cloudflare dashboard and its id passed as `cloudflare_zone_id`.
       && terraform validate && terraform test
 
 `deploy/ci.sh` runs this; `tests/guarantees.tftest.hcl` uses mocked providers to assert the bucket is
-private/versioned/retained, the IAM policy names only this bucket, and Access allows only the emails in `parent_emails` (Ryan and Kim; every one must also be a family parent via `cubby-server family add-parent`).
+private/versioned/retained, the IAM policy names only this bucket, and Access allows only the Pocket ID login method (instant auth) and one rule: OIDC claim `groups` contains `cubby-parents` (every member must also be a family parent via `cubby-server family add-parent`).
 
 ## Plan and apply (the Concierge, with an MFA session and a Cloudflare token)
 
