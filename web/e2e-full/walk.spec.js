@@ -197,7 +197,10 @@ test.describe('smoke walk, pointed at the harness stack', () => {
 
 const freePort = () =>
 	new Promise((res) => {
-		const s = createServer().listen(0, '127.0.0.1', () => s.close(() => res(s.address().port)));
+		const s = createServer().listen(0, '127.0.0.1', () => {
+			const { port } = s.address();
+			s.close(() => res(port));
+		});
 	});
 
 test.describe('smoke walk, public base differs from the probe address', () => {
