@@ -105,8 +105,8 @@ test.describe('hermetic stack', () => {
 			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
 			await expect(child.getByText(VIDEOS[SLIME].title)).toHaveCount(0);
 			await expect
-				.poll(() => child.locator('img.thumb').evaluateAll((imgs) => imgs.map((i) => i.naturalWidth)))
-				.toSatisfy((w) => w.length > 0 && w.every((n) => n > 0));
+				.poll(() => child.locator('img.thumb').evaluateAll((imgs) => imgs.length > 0 && imgs.every((i) => i.naturalWidth > 0)))
+				.toBe(true);
 		});
 
 		await test.step('search finds the allowed video and not the other', async () => {
