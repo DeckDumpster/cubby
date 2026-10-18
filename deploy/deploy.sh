@@ -21,6 +21,24 @@ install -m 0644 "$root/deploy/cubby-worker.service" "$root/deploy/cubby-worker.t
 
 # The server's env file is optional in content but must exist: Quadlet rejects a "-" prefix.
 [ -e "$cfg_dir/server.env" ] || install -m 0600 /dev/null "$cfg_dir/server.env"
+# Without the Access settings the server answers "Cloudflare Access is not configured" to every
+# parent request. Fill them from Terraform if absent, and refuse to (re)start the server without them.
+access_missing() {
+    local k out=()
+    for k in CUBBY_ACCESS_TEAM_DOMAIN CUBBY_ACCESS_AUD CUBBY_ACCESS_JWKS_URL; do
+        grep -qE "^$k=.+" "$cfg_dir/server.env" || out+=("$k")
+    done
+    echo "${out[*]:-}"
+}
+if [ -n "$(access_missing)" ]; then
+    "$root/deploy/access-env.sh" || echo "==> deploy/access-env.sh failed" >&2
+    missing="$(access_missing)"
+    if [ -n "$missing" ]; then
+        echo "==> $cfg_dir/server.env lacks: $missing" >&2
+        echo "    /parent would reject everyone; run deploy/access-env.sh (Terraform outputs) and redeploy" >&2
+        exit 1
+    fi
+fi
 # The worker's keys (CUBBY_YT_API_KEY, CUBBY_OTLP_ENDPOINT) are all optional, but podman --env-file
 # exits 125 on a missing file, so the timer would fail every firing. Create it empty.
 [ -e "$cfg_dir/worker.env" ] || install -m 0600 /dev/null "$cfg_dir/worker.env"

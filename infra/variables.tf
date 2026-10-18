@@ -42,3 +42,9 @@ variable "permissions_boundary_arn" {
   description = "Boundary the terraform-deploy role requires on every IAM user or role it creates."
   default     = "arn:aws:iam::189923011121:policy/terraform-deploy-boundary"
 }
+
+variable "access_team_domain" {
+  type        = string
+  default     = "https://royal-glitter-fbe6.cloudflareaccess.com"
+  description = "Full Zero Trust team URL; the expected iss of Access JWTs."
+}
