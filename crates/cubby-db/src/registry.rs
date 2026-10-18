@@ -106,7 +106,7 @@ impl Registry {
             .then_some(())
             .ok_or_else(|| DbError::BadId(family_id.to_string()))?;
         let email = email.trim().to_ascii_lowercase();
-        if !self
+        if self
             .conn
             .query_row(
                 "SELECT 1 FROM families WHERE id=?1",
@@ -114,7 +114,7 @@ impl Registry {
                 |_| Ok(()),
             )
             .optional()?
-            .is_some()
+            .is_none()
         {
             return Err(DbError::Invalid(format!("no family {family_id}")));
         }
