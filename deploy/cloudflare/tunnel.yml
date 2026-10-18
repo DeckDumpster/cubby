@@ -1,6 +1,0 @@
-# cloudflared ingress for cubby.gantt.pub. The tunnel UUID and credentials file are filled in
-# by cloudflare/apply.sh (tunnel: / credentials-file: are written to ~/.cloudflared/cubby.yml).
-ingress:
-  - hostname: cubby.gantt.pub
-    service: http://127.0.0.1:8790
-  - service: http_status:404
