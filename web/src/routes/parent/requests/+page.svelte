@@ -4,6 +4,8 @@
 	const ps = getParent();
 </script>
 
+<svelte:head><title>Requests · Cubby</title></svelte:head>
+
 <section class="panel">
 	<h2>Requests</h2>
 	<ul class="list">

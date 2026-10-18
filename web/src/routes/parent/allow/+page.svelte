@@ -5,6 +5,8 @@
 	const ps = getParent();
 </script>
 
+<svelte:head><title>Allow · Cubby</title></svelte:head>
+
 <section class="panel">
 	<h2>Allow a video, channel or playlist</h2>
 	<form class="form" onsubmit={(e) => { e.preventDefault(); ps.allow(); }}>

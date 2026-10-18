@@ -3,6 +3,8 @@
 	const ps = getParent();
 </script>
 
+<svelte:head><title>Children · Cubby</title></svelte:head>
+
 <section class="panel">
 	<h2>Children</h2>
 	{#each ps.children as c (c.id)}
