@@ -161,10 +161,10 @@ fn home_with(
     Ok(json!({
         "remaining": remaining,
         "sections": [
-            {"key": "continue", "tiles": cont},
-            {"key": "liked_channels", "tiles": ranked(ranker, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
-            {"key": "new", "tiles": newest.iter().take(HOME_ROW).map(|v| tile(v)).collect::<Vec<_>>()},
-            {"key": "all", "tiles": ranked(ranker, &c, None, &rows, HOME_ALL).iter().map(|v| tile(v)).collect::<Vec<_>>()},
+            {"key": "continue", "title": "Keep watching", "tiles": cont},
+            {"key": "liked_channels", "title": "From channels you like", "tiles": ranked(ranker, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
+            {"key": "new", "title": "New", "tiles": newest.iter().take(HOME_ROW).map(|v| tile(v)).collect::<Vec<_>>()},
+            {"key": "all", "title": "Everything", "tiles": ranked(ranker, &c, None, &rows, HOME_ALL).iter().map(|v| tile(v)).collect::<Vec<_>>()},
         ],
     }))
 }

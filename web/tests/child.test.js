@@ -61,3 +61,17 @@ test('loadYT resolves at once when the API is already there', async () => {
 	const YT = { Player: class {} };
 	assert.equal(await loadYT({ YT }), YT);
 });
+
+import { readFileSync } from 'node:fs';
+import { parseHome, parseSearch } from '../src/lib/child.js';
+const fixture = (/** @type {string} */ n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf8'));
+
+test('the page reads the server home payload: sections carry titled tiles', () => {
+	const { sections } = parseHome(fixture('child-home.json'));
+	assert.equal(sections[0].title, 'New');
+	assert.equal(sections[0].tiles[0].youtube_id, 'a');
+});
+
+test('the page reads the server search payload as tiles', () => {
+	assert.equal(parseSearch(fixture('child-search.json'))[0].youtube_id, 'a');
+});

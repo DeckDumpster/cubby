@@ -11,7 +11,9 @@
 		PLAYER_HOST,
 		PLAYER_VARS,
 		refusalMessage,
-		token
+		token,
+		parseHome,
+		parseSearch
 	} from '$lib/child.js';
 
 	type Tile = { youtube_id: string; title: string; channel_title?: string; channel_avatar?: string; thumb?: string };
@@ -27,7 +29,7 @@
 	let child = $state<{ name?: string; avatar?: string }>({});
 	let remaining = $state<Remaining>({ videos: null, minutes: null });
 	let total = $state<number | null>(null);
-	let sections = $state<{ key: string; title: string; items: Tile[] }[]>([]);
+	let sections = $state<{ key: string; title: string; tiles: Tile[] }[]>([]);
 	let expanded = $state<Record<string, boolean>>({});
 	let query = $state('');
 	let results = $state<Tile[] | null>(null);
@@ -68,7 +70,7 @@
 		child = data.child ?? {};
 		remaining = data.remaining ?? remaining;
 		total = data.total_videos ?? total;
-		sections = data.sections ?? [];
+		sections = parseHome(data).sections;
 	}
 
 	onMount(() => {
@@ -103,7 +105,7 @@
 			return;
 		}
 		const { status, data } = await guarded(api(`/api/child/search?q=${encodeURIComponent(q)}`));
-		results = status === 200 ? (data.items ?? data.results ?? []) : [];
+		results = status === 200 ? parseSearch(data) : [];
 	}
 
 	function destroyPlayer() {
@@ -148,7 +150,7 @@
 		if (id && next === 'ended') {
 			const { status, data } = await api(`/api/child/next?after=${encodeURIComponent(id)}`);
 			if (status === 200) {
-				suggestions = data.items ?? data.tiles ?? [];
+				suggestions = parseSearch(data);
 				remaining = data.remaining ?? remaining;
 			}
 		}
@@ -277,17 +279,17 @@
 					<div class="grid">{#each results as t (t.youtube_id)}{@render tile(t)}{/each}</div>
 				</section>
 			{:else}
-				{#if sections.every((s) => s.items.length === 0)}
+				{#if sections.every((s) => s.tiles.length === 0)}
 					<p class="empty" data-testid="nothing-allowed">Nothing is allowed yet. Ask a grown-up to add some videos.</p>
 				{/if}
 				{#each sections as s (s.key)}
-					{#if s.items.length}
+					{#if s.tiles.length}
 						<section>
 							<h2>{s.title}</h2>
 							<div class="grid">
-								{#each expanded[s.key] ? s.items : s.items.slice(0, SHOWN) as t (t.youtube_id)}{@render tile(t)}{/each}
+								{#each expanded[s.key] ? s.tiles : s.tiles.slice(0, SHOWN) as t (t.youtube_id)}{@render tile(t)}{/each}
 							</div>
-							{#if !expanded[s.key] && s.items.length > SHOWN}
+							{#if !expanded[s.key] && s.tiles.length > SHOWN}
 								<button class="more" onclick={() => (expanded[s.key] = true)}>More</button>
 							{/if}
 						</section>
