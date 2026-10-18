@@ -98,6 +98,19 @@ for e in server.env worker.env; do
     [ "$(grep -c '^CUBBY_OTLP_ENDPOINT=' "$t/cubby/$e")" = 1 ] || fail "$e has a duplicate OTLP endpoint"
 done
 
+# --- The deploy ends in the smoke walk, and a walk that fails makes the deploy fail.
+out="$(CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$t" ./deploy.sh 2>&1)"
+case "$out" in *"dry-run: "*"deploy/smoke.sh"*) ;; *) fail "deploy does not run the smoke walk: $out";; esac
+fakebin="$(mktemp -d)"
+for c in podman systemctl journalctl; do printf '#!/bin/sh\nexit 0\n' >"$fakebin/$c"; chmod +x "$fakebin/$c"; done
+printf '#!/bin/sh\nexit 22\n' >"$fakebin/curl"; chmod +x "$fakebin/curl"
+s="$(mktemp -d)"; mkdir -p "$s/cubby"
+printf 'CUBBY_ACCESS_TEAM_DOMAIN=x\nCUBBY_ACCESS_AUD=y\nCUBBY_ACCESS_JWKS_URL=z\n' >"$s/cubby/server.env"
+if out="$(PATH="$fakebin:$PATH" CUBBY_SMOKE_WAIT_S=1 XDG_CONFIG_HOME="$s" ./deploy.sh 2>&1)"; then fail "deploy passed with a failing smoke walk"; fi
+case "$out" in *"deploy FAILED"*) ;; *) fail "failed walk not reported as a failed deploy: $out";; esac
+case "$out" in *"cubby deployed and walked"*) fail "failed walk still said deployed";; esac
+rm -rf "$fakebin" "$s"
+
 # --- Every env file a unit names must be created by deploy, or deploy must skip the unit without it.
 for f in *.container *.service; do
     for name in $(grep -hoE '(EnvironmentFile=|--env-file=)[^ ]*' "$f" | sed 's|.*/||'); do

@@ -11,3 +11,7 @@ timeout = 1800
 
 [ui]
 dir = "web"
+
+[tier.e2e]
+argv = ["bash", "deploy/e2e.sh"]
+timeout = 1800
