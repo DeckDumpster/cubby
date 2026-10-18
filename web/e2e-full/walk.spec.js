@@ -165,8 +165,21 @@ test.describe('hermetic stack', () => {
 		await test.step('Sign out ends the parent session', async () => {
 			await expect(parent.getByRole('link', { name: 'Sign out' })).toHaveAttribute('href', '/auth/logout');
 			expect((await parentCtx.request.get('/api/parent/children')).status()).toBe(200);
+			const provider = new URL((await parentCtx.request.get('/auth/login', { maxRedirects: 0 })).headers().location).origin;
+			const state = async () => (await fetch(`${provider}/__state`)).json();
+			const before = (await state()).authorizes;
 			await parent.getByRole('link', { name: 'Sign out' }).click();
+			await parent.waitForURL(/\/signed-out$/);
+			await expect(parent.getByRole('heading', { name: "You're signed out" })).toBeVisible();
 			expect((await parentCtx.request.get('/api/parent/children')).status()).toBe(401);
+			// The provider's session ended too, and nothing signs the browser back in on its own.
+			expect((await state()).signedIn).toBe(false);
+			await parent.waitForTimeout(1500);
+			expect(parent.url()).toMatch(/\/signed-out$/);
+			expect((await state()).authorizes).toBe(before);
+			await parent.getByRole('link', { name: 'Sign in again' }).click();
+			await parent.waitForURL(/\/parent\/allow/);
+			expect((await state()).authorizes).toBe(before + 1);
 		});
 	});
 });
