@@ -115,3 +115,32 @@ async fn search_returns_only_playable_videos() {
     let (_, none) = get(api(false), "/api/child/search?q=", true).await;
     assert!(ids(&none["tiles"]).is_empty());
 }
+
+fn shape(v: &Value) -> Value {
+    match v {
+        Value::Object(m) => Value::Object(m.iter().map(|(k, v)| (k.clone(), shape(v))).collect()),
+        Value::Array(a) => Value::Array(a.first().map(shape).into_iter().collect()),
+        _ => Value::Null,
+    }
+}
+
+fn fixture(name: &str) -> Value {
+    let p = format!("{}/../../web/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+// The web page's parsers are tested against these same fixtures (web/tests/child.test.js),
+// so renaming a field on either side fails one of the two.
+#[tokio::test]
+async fn home_and_search_json_match_the_fixtures_the_page_parses() {
+    let (_, home) = get(api(false), "/api/child/home", true).await;
+    let new = home["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["key"] == "new")
+        .unwrap();
+    assert_eq!(shape(new), shape(&fixture("child-home.json")["sections"][0]));
+    let (_, search) = get(api(false), "/api/child/search?q=blue", true).await;
+    assert_eq!(shape(&search), shape(&fixture("child-search.json")));
+}

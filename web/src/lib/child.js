@@ -129,3 +129,18 @@ export async function api(path, opts = {}) {
 	}
 	return { status: res.status, data };
 }
+
+/** The home payload as the page uses it: `sections[].tiles`, the one field name the server sends. */
+export function parseHome(/** @type {any} */ data) {
+	const sections = (data?.sections ?? []).map((/** @type {any} */ s) => ({
+		key: String(s.key),
+		title: s.title ?? String(s.key),
+		tiles: s.tiles ?? []
+	}));
+	return { sections };
+}
+
+/** Search and suggestion payloads: `tiles`. */
+export function parseSearch(/** @type {any} */ data) {
+	return data?.tiles ?? [];
+}
