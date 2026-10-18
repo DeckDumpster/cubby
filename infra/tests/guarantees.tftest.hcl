@@ -22,6 +22,12 @@ override_resource {
   }
 }
 
+override_resource {
+  target          = cloudflare_dns_record.zone
+  override_during = plan
+  values          = {}
+}
+
 run "bucket_is_private_versioned_retained" {
   command = plan
 
@@ -145,5 +151,14 @@ run "fastmail_dns_is_declared_exactly_and_unproxied" {
   assert {
     condition     = cloudflare_dns_record.cubby.proxied == true
     error_message = "cubby's own record is proxied"
+  }
+}
+
+run "imports_cover_every_zone_record" {
+  command = plan
+
+  assert {
+    condition     = toset(keys(local.zone_record_ids)) == toset(keys(local.zone_records))
+    error_message = "imports.tf keys must match local.zone_records keys exactly"
   }
 }
