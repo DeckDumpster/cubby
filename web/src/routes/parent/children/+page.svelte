@@ -47,6 +47,14 @@
 		<input placeholder="Time zone" bind:value={ps.newChild.tz} />
 		<button class="primary" onclick={ps.addChild} disabled={!ps.newChild.name}>Add</button>
 	</div>
+	<div class="card">
+		<h3>Parents</h3>
+		<ul class="list" aria-label="Parents">
+			{#each ps.parents as email (email)}
+				<li>{email}</li>
+			{/each}
+		</ul>
+	</div>
 </section>
 
 <style>

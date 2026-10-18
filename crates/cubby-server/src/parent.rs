@@ -24,6 +24,7 @@ type Result<T> = std::result::Result<T, ApiError>;
 
 pub(crate) fn routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/api/parent/parents", get(parents))
         .route("/api/parent/children", get(children).post(add_child))
         .route("/api/parent/children/{id}", put(edit_child))
         .route("/api/parent/children/{id}/budget", put(set_budget))
@@ -338,6 +339,18 @@ async fn approve(
 ) -> Result<Json<Value>> {
     store::approve_video(&conn(&s, &f)?, &id, unix_now())?;
     Ok(Json(json!({"ok": true})))
+}
+
+async fn parents(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+) -> Result<Json<Value>> {
+    let emails = s
+        .registry
+        .lock()
+        .map_err(ApiError::internal)?
+        .parents(&f.0)?;
+    Ok(Json(json!(emails)))
 }
 
 async fn requests(

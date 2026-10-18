@@ -15,13 +15,22 @@ pub struct Family {
 
 pub const REGISTRY_VERSION: i64 = MIGRATIONS.len() as i64;
 
-const MIGRATIONS: [&str; 1] = ["CREATE TABLE families(
+const MIGRATIONS: [&str; 2] = [
+    "CREATE TABLE families(
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
     created_at INTEGER NOT NULL
-)"];
+)",
+    "CREATE TABLE family_parents(
+    family_id TEXT NOT NULL REFERENCES families(id),
+    email TEXT NOT NULL UNIQUE,
+    added_at INTEGER NOT NULL
+);
+INSERT INTO family_parents(family_id,email,added_at) SELECT id,email,created_at FROM families",
+];
 
-/// The file-per-tenant registry: `registry.sqlite` maps a parent email to a family id, and the
+/// The file-per-tenant registry: `registry.sqlite` maps each parent email (a family has one or more)
+/// to a family id, and the
 /// family's data lives in `family-<id>.sqlite` beside it. A family's file is named by its minted
 /// id, never by the email.
 pub struct Registry {
@@ -61,10 +70,18 @@ impl Registry {
                 .map_or(0, |d| d.as_secs() as i64),
         };
         let tx = self.conn.transaction()?;
-        match tx.execute(
-            "INSERT INTO families(id,email,created_at) VALUES (?1,?2,?3)",
-            rusqlite::params![f.id, f.email, f.created_at],
-        ) {
+        let inserted = tx
+            .execute(
+                "INSERT INTO families(id,email,created_at) VALUES (?1,?2,?3)",
+                rusqlite::params![f.id, f.email, f.created_at],
+            )
+            .and_then(|_| {
+                tx.execute(
+                    "INSERT INTO family_parents(family_id,email,added_at) VALUES (?1,?2,?3)",
+                    rusqlite::params![f.id, f.email, f.created_at],
+                )
+            });
+        match inserted {
             Ok(_) => {}
             Err(rusqlite::Error::SqliteFailure(e, _))
                 if e.code == rusqlite::ErrorCode::ConstraintViolation =>
@@ -82,11 +99,58 @@ impl Registry {
         Ok(f)
     }
 
+    /// Adds `email` as a co-parent of family `family_id`. An email already a parent of any family
+    /// is `Taken`.
+    pub fn add_parent(&mut self, family_id: &str, email: &str) -> Result<()> {
+        valid_id(family_id)
+            .then_some(())
+            .ok_or_else(|| DbError::BadId(family_id.to_string()))?;
+        let email = email.trim().to_ascii_lowercase();
+        if !self
+            .conn
+            .query_row(
+                "SELECT 1 FROM families WHERE id=?1",
+                [family_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some()
+        {
+            return Err(DbError::Invalid(format!("no family {family_id}")));
+        }
+        let added_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        match self.conn.execute(
+            "INSERT INTO family_parents(family_id,email,added_at) VALUES (?1,?2,?3)",
+            rusqlite::params![family_id, email, added_at],
+        ) {
+            Ok(_) => Ok(()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                Err(DbError::Taken(email))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// The parent emails of `family_id`, sorted.
+    pub fn parents(&self, family_id: &str) -> Result<Vec<String>> {
+        let mut s = self
+            .conn
+            .prepare("SELECT email FROM family_parents WHERE family_id=?1 ORDER BY email")?;
+        let rows = s.query_map([family_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The family `email` is a parent of.
     pub fn lookup(&self, email: &str) -> Result<Option<Family>> {
         Ok(self
             .conn
             .query_row(
-                "SELECT id,email,created_at FROM families WHERE email=?1",
+                "SELECT f.id,f.email,f.created_at FROM family_parents p
+                 JOIN families f ON f.id=p.family_id WHERE p.email=?1",
                 [email.trim().to_ascii_lowercase()],
                 row,
             )
@@ -149,6 +213,58 @@ mod tests {
         r.create_family("a@b.c").unwrap();
         assert!(matches!(r.create_family("A@B.C"), Err(DbError::Taken(_))));
         assert_eq!(r.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_co_parent_resolves_to_the_same_family() {
+        let d = tempfile::tempdir().unwrap();
+        let mut r = Registry::open(d.path()).unwrap();
+        let f = r.create_family("ryan@x.y").unwrap();
+        r.add_parent(&f.id, " Kim@Gmail.com ").unwrap();
+        assert_eq!(r.lookup("kim@gmail.com").unwrap(), Some(f.clone()));
+        assert_eq!(r.lookup("ryan@x.y").unwrap(), Some(f.clone()));
+        assert_eq!(r.parents(&f.id).unwrap(), ["kim@gmail.com", "ryan@x.y"]);
+        assert_eq!(r.list().unwrap(), [f]);
+    }
+
+    #[test]
+    fn a_parent_email_cannot_belong_to_two_families() {
+        let d = tempfile::tempdir().unwrap();
+        let mut r = Registry::open(d.path()).unwrap();
+        let a = r.create_family("a@b.c").unwrap();
+        let b = r.create_family("d@e.f").unwrap();
+        assert!(matches!(
+            r.add_parent(&b.id, "A@B.C"),
+            Err(DbError::Taken(_))
+        ));
+        assert!(matches!(r.create_family("d@e.f"), Err(DbError::Taken(_))));
+        assert!(matches!(
+            r.add_parent("01ABC", "z@z.z"),
+            Err(DbError::BadId(_))
+        ));
+        assert!(matches!(
+            r.add_parent("01ARZ3NDEKTSV4RRFFQ69G5FAV", "z@z.z"),
+            Err(DbError::Invalid(_))
+        ));
+        assert_eq!(r.parents(&a.id).unwrap(), ["a@b.c"]);
+    }
+
+    #[test]
+    fn migrating_a_v1_registry_seeds_family_parents_from_families() {
+        let d = tempfile::tempdir().unwrap();
+        let c = Connection::open(d.path().join("registry.sqlite")).unwrap();
+        c.execute_batch(MIGRATIONS[0]).unwrap();
+        c.execute(
+            "INSERT INTO families(id,email,created_at) VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FAV','old@x.y',1)",
+            [],
+        )
+        .unwrap();
+        c.pragma_update(None, "user_version", 1).unwrap();
+        drop(c);
+        let r = Registry::open(d.path()).unwrap();
+        let f = r.lookup("old@x.y").unwrap().unwrap();
+        assert_eq!(f.id, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        assert_eq!(r.parents(&f.id).unwrap(), ["old@x.y"]);
     }
 
     #[test]

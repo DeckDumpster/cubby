@@ -516,3 +516,15 @@ async fn without_ingest_an_allowed_video_is_pending_until_the_worker_runs() {
     let (_, pols) = e.parent("GET", "/api/parent/policies", None).await;
     assert_eq!(pols[0]["pending"], true);
 }
+
+#[tokio::test]
+async fn the_parents_endpoint_lists_every_parent_of_the_family() {
+    let e = env().await;
+    Registry::open(&e.dir.join("data"))
+        .unwrap()
+        .add_parent(&e.family_id, "kim@gmail.com")
+        .unwrap();
+    let (s, body) = e.parent("GET", "/api/parent/parents", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body, json!(["kim@gmail.com", PARENT]));
+}

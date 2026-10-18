@@ -637,6 +637,51 @@ async fn the_family_cli_creates_a_family_an_access_request_is_then_accepted_for(
     let mut out = Vec::new();
     cubby_server::family_cli::run(&data, &args(&["list"]), &mut out).unwrap();
     assert!(String::from_utf8(out).unwrap().contains(&fam.id));
+
+    let mut out = Vec::new();
+    cubby_server::family_cli::run(
+        &data,
+        &args(&["add-parent", PARENT, "Kim@Gmail.com"]),
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        format!("{}\tkim@gmail.com\n", fam.id)
+    );
+    let (s, _) = e
+        .parent_post(PAIRING, Some(&good_jwt("kim@gmail.com")))
+        .await;
+    assert_eq!(s, StatusCode::OK, "a co-parent reaches the same family");
+    let mut out = Vec::new();
+    cubby_server::family_cli::run(&data, &args(&["list"]), &mut out).unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        format!("{}\tkim@gmail.com,{PARENT}\n", fam.id)
+    );
+    assert!(
+        cubby_server::family_cli::run(
+            &data,
+            &args(&["add-parent", &fam.id, PARENT]),
+            &mut Vec::new()
+        )
+        .is_err(),
+        "an email already a parent is refused"
+    );
+    cubby_server::family_cli::run(
+        &data,
+        &args(&["add-parent", &fam.id, "by-id@example.com"]),
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert!(
+        cubby_server::family_cli::run(
+            &data,
+            &args(&["add-parent", "nobody@example.com", "z@z.z"]),
+            &mut Vec::new()
+        )
+        .is_err()
+    );
     assert!(
         cubby_server::family_cli::run(&data, &args(&["create", PARENT]), &mut Vec::new()).is_err(),
         "a second create for the same email is refused"
