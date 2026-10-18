@@ -22,6 +22,7 @@ cargo test --workspace
 
 echo "==> deploy artefacts"
 bash deploy/test-deploy.sh
+bash deploy/test-dns-diff.sh
 
 echo "==> infra: terraform fmt, validate, test"
 tf_version=1.13.3

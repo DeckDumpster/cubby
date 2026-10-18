@@ -1,0 +1,9 @@
+[
+  {"name": "gantt.pub", "type": "MX", "priority": 10, "content": "in1-smtp.messagingengine.com", "ttl": 3600},
+  {"name": "gantt.pub", "type": "MX", "priority": 20, "content": "in2-smtp.messagingengine.com", "ttl": 3600},
+  {"name": "gantt.pub", "type": "TXT", "content": "v=spf1 include:spf.messagingengine.com ?all", "ttl": 300},
+  {"name": "fm1._domainkey.gantt.pub", "type": "CNAME", "content": "fm1.gantt.pub.dkim.fmhosted.com", "ttl": 3600},
+  {"name": "fm2._domainkey.gantt.pub", "type": "CNAME", "content": "fm2.gantt.pub.dkim.fmhosted.com", "ttl": 3600},
+  {"name": "fm3._domainkey.gantt.pub", "type": "CNAME", "content": "fm3.gantt.pub.dkim.fmhosted.com", "ttl": 3600},
+  {"name": "_dmarc.gantt.pub", "type": "TXT", "content": "v=DMARC1; p=none;", "ttl": 3600}
+]

@@ -17,6 +17,10 @@ Cloudflare (`cloudflare.tf`): the `cubby.gantt.pub` CNAME, the `cubby` tunnel wi
 allowing only `ryan@gantt.pub`, and a bypass application for `/watch`, `/api/child`, `/assets`,
 `/_app` and `/healthz` (protected by the device token instead).
 
+DNS (`dns.tf`, `dns-records.json`): every other gantt.pub record, mirrored from Route 53 (the Fastmail
+MX, SPF, DKIM CNAMEs and DMARC), unproxied. Terraform manages records only; the zone is created in the
+Cloudflare dashboard and its id passed as `cloudflare_zone_id`.
+
 ## Check (no credentials)
 
     cd infra && terraform fmt -check -recursive && terraform init -backend=false \
@@ -53,3 +57,25 @@ Never applied from CI. Note: the `terraform-deploy` role is scoped to `spira-*` 
     LITESTREAM_S3_REGION=$(terraform output -raw bucket_region) deploy/litestream-env.sh
 
 Then run `deploy/deploy.sh`.
+
+## Moving gantt.pub to Cloudflare
+
+Cloudflare Tunnel and Access need the whole zone on Cloudflare, so gantt.pub's DNS moves from Route 53.
+Mail stays on Fastmail; the registrar is DreamHost.
+
+1. Ryan creates the gantt.pub zone in the Cloudflare dashboard; note its zone id and the two assigned
+   nameservers (`<name>.ns.cloudflare.com`).
+2. The Concierge applies this root (see above). The records now exist on Cloudflare but are not yet live.
+3. Parity check, before touching DreamHost:
+
+       deploy/dns-diff.sh <assigned-cloudflare-nameserver>
+
+   It asks that nameserver and Route 53 (an awsdns server found from the current NS set, or pass one as
+   the second argument) for every record in `infra/dns-records.json`, and fails on any difference or any
+   answer that is not the declared one. Proceed only on `dns parity ok`.
+4. In DreamHost (Domains > Manage Domains > gantt.pub > DNS/Nameservers), replace the nameservers with the
+   two Cloudflare ones. Leave the Route 53 zone untouched.
+5. Verify mail (MX, SPF, DKIM, DMARC) and `cubby.gantt.pub` once the change propagates.
+
+Rollback: in DreamHost, point gantt.pub back at the four `awsdns` nameservers of the Route 53 zone, which
+was left in place and still answers. Nothing else needs undoing.
