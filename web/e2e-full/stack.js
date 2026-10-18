@@ -137,8 +137,8 @@ function fakeYouTube() {
 	return { server, calls };
 }
 
-/** Starts the fakes and the server binary; resolves to the base URL and a stop function. */
-export async function startStack({ ports = {} } = {}) {
+/** Starts the fakes and the server binary (publicBaseURL: what OIDC_BASE_URL says, when it is not the address probed); resolves to the base URL and a stop function. */
+export async function startStack({ ports = {}, publicBaseURL } = {}) {
 	const web = resolve(import.meta.dirname, '../build');
 	const bin = process.env.CUBBY_SERVER_BIN ?? join(process.env.CARGO_TARGET_DIR ?? resolve(import.meta.dirname, '../../target'), 'debug/cubby-server');
 	if (!existsSync(join(web, 'index.html'))) throw new Error(`no built web app at ${web}; run npm run build`);
@@ -161,7 +161,7 @@ export async function startStack({ ports = {} } = {}) {
 			CUBBY_OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
 			CUBBY_OIDC_CLIENT_ID: CLIENT_ID,
 			CUBBY_OIDC_CLIENT_SECRET: CLIENT_SECRET,
-			CUBBY_OIDC_BASE_URL: `http://127.0.0.1:${port}`,
+			CUBBY_OIDC_BASE_URL: publicBaseURL ?? `http://127.0.0.1:${port}`,
 			CUBBY_BOOTSTRAP_PARENT: PARENT_EMAIL,
 			CUBBY_YT_API_KEY: 'fake-key',
 			CUBBY_YT_BASE_URL: `http://127.0.0.1:${ytPort}/youtube/v3`

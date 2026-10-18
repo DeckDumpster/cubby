@@ -4,9 +4,10 @@
 //     stubbed by a local OIDC provider, YouTube by a local fake), every step;
 //   - e2e:smoke against a deployed instance (SMOKE_BASE_URL), where what a step needs and the
 //     environment lacks is skipped with its reason printed.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { PARENT_EMAIL, VIDEOS, HANDLE } from './stack.js';
+import { createServer } from 'node:net';
+import { PARENT_EMAIL, VIDEOS, HANDLE, startStack } from './stack.js';
 
 const smoke = !!process.env.SMOKE_BASE_URL;
 const VOLCANO = 'VOLCANO0001';
@@ -237,6 +238,49 @@ test.describe('smoke walk, pointed at the harness stack', () => {
 	});
 });
 
+const freePort = () =>
+	new Promise((res) => {
+		const s = createServer().listen(0, '127.0.0.1', () => {
+			const { port } = s.address();
+			s.close(() => res(port));
+		});
+	});
+
+test.describe('smoke walk, public base differs from the probe address', () => {
+	test.skip(smoke, 'the smoke walk is run by deploy/smoke.sh in this mode');
+
+	const PUBLIC = 'https://cubby.example.test';
+	let stack;
+	test.beforeAll(async () => {
+		stack = await startStack({ ports: { server: await freePort() }, publicBaseURL: PUBLIC });
+	});
+	test.afterAll(() => stack?.stop());
+
+	// Async: the stack's fake provider lives in this process and must keep answering discovery.
+	const run = (publicBase) =>
+		new Promise((res) => {
+			const p = spawn('npx', ['playwright', 'test', '-c', 'playwright.smoke.config.js', '-g', 'parent steps'], {
+				env: { ...process.env, SMOKE_BASE_URL: stack.baseURL, SMOKE_PUBLIC_BASE_URL: publicBase }
+			});
+			let stdout = '';
+			p.stdout.on('data', (d) => (stdout += d));
+			p.stderr.on('data', (d) => (stdout += d));
+			p.on('close', (status) => res({ status, stdout, stderr: '' }));
+		});
+
+	test('passes when redirect_uri uses the configured public base', async () => {
+		const r = await run(PUBLIC);
+		console.log(r.stdout, r.stderr);
+		expect(r.status).toBe(0);
+	});
+
+	test('fails when the redirect host is wrong', async () => {
+		const r = await run('https://wrong.example.test');
+		expect(r.status, 'a wrong redirect host must fail the smoke walk').not.toBe(0);
+		expect(r.stdout).toContain('/auth/callback');
+	});
+});
+
 test.describe('deployed instance', () => {
 	test.skip(!smoke, 'the smoke walk needs SMOKE_BASE_URL');
 
@@ -252,7 +296,10 @@ test.describe('deployed instance', () => {
 		expect(login.status(), 'sign-in could not reach the provider (discovery failed?)').toBe(303);
 		const to = new URL(login.headers().location);
 		expect(to.pathname).toMatch(/authorize/);
-		expect(to.searchParams.get('redirect_uri')).toBe(`${baseURL}/auth/callback`);
+		// The provider is sent the configured public address (CUBBY_OIDC_BASE_URL), which behind a
+		// proxy is not the address the smoke walk probes.
+		const publicBase = process.env.SMOKE_PUBLIC_BASE_URL ?? baseURL;
+		expect(to.searchParams.get('redirect_uri')).toBe(`${publicBase}/auth/callback`);
 		expect(to.searchParams.get('scope')).toBe('openid email profile groups');
 		console.log('parent steps: /parent sends a signed-out browser to the provider');
 		skipped('signing in and the writes behind it are not run: a deploy has no parent to sign in as');
