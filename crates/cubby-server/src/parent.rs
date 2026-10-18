@@ -199,7 +199,7 @@ async fn child_history(
             .map(|g| {
                 json!({"id": g.id, "youtube_id": g.youtube_id, "title": g.title,
                     "granted_at": g.granted_at, "watched_s": g.watched_s, "charge": g.charge,
-                    "ended_at": g.ended_at, "end_reason": g.end_reason})
+                    "ended_at": g.ended_at, "end_reason": g.end_reason, "thumb": g.thumb})
             })
             .collect(),
     )))

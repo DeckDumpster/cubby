@@ -74,3 +74,55 @@ export async function api(method, path, body) {
 	if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
 	return data;
 }
+
+/** @param {string} id */
+export function watchUrl(id) {
+	return `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+}
+
+/**
+ * @param {number} t unix seconds
+ * @param {string} [tz]
+ */
+export function fmtTime(t, tz) {
+	return new Date(t * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz });
+}
+
+/** @param {string | null} reason */
+export function endLabel(reason) {
+	const words = /** @type {Record<string, string>} */ ({
+		ended: 'Finished the video',
+		left: 'Left the video',
+		stop: 'Stopped it',
+		'off-list': 'Taken off the allow-list',
+		timeout: 'Went quiet, timed out'
+	});
+	return reason === null ? 'Still playing' : (words[reason] ?? reason);
+}
+
+/**
+ * Plays grouped under one heading per local day in tz, newest day first.
+ * @template {{granted_at: number}} T
+ * @param {T[]} grants
+ * @param {string | undefined} tz
+ * @param {number} now unix seconds
+ * @returns {{key: string, label: string, items: T[]}[]}
+ */
+export function dayGroups(grants, tz, now) {
+	const key = (/** @type {number} */ t) => new Date(t * 1000).toLocaleDateString('en-CA', { timeZone: tz });
+	const today = key(now);
+	const yesterday = key(now - 86400);
+	/** @type {Map<string, {key: string, label: string, items: T[]}>} */
+	const out = new Map();
+	for (const g of [...grants].sort((a, b) => b.granted_at - a.granted_at)) {
+		const k = key(g.granted_at);
+		if (!out.has(k)) {
+			const label =
+				k === today ? 'Today' : k === yesterday ? 'Yesterday'
+				: new Date(g.granted_at * 1000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz }).replace(',', '');
+			out.set(k, { key: k, label, items: [] });
+		}
+		out.get(k)?.items.push(g);
+	}
+	return [...out.values()];
+}

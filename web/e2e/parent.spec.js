@@ -160,3 +160,34 @@ test('the child picture is picked from emoji when adding and editable from the c
 	await expect(card.locator('.avatar')).toHaveText('🚀');
 	expect(sent[1].method).toBe('PUT');
 });
+
+test('History groups plays under a day heading with time-only rows linking to the video', async ({ page }) => {
+	const plays = [
+		{ id: 'g1', title: 'How volcanoes work', youtube_id: 'abc', granted_at: 1760131500, watched_s: 312, charge: 1, end_reason: 'ended', thumb: null },
+		{ id: 'g2', title: 'Slime recipes', youtube_id: 'xyz', granted_at: 1760050000, watched_s: 40, charge: 0.5, end_reason: 'left', thumb: null },
+		{ id: 'g3', title: 'Second that day', youtube_id: 'def', granted_at: 1760052000, watched_s: 9, charge: 0.1, end_reason: 'timeout', thumb: null }
+	];
+	await page.route('**/api/parent/**', (route) => {
+		const u = route.request().url();
+		return route.fulfill({ json: u.includes('/history') ? plays : u.includes('/children') ? CHILDREN : [] });
+	});
+	for (const [w, h] of [[390, 844], [1280, 800]]) {
+		await page.setViewportSize({ width: w, height: h });
+		await page.goto('/parent/history');
+		const days = page.getByTestId('day');
+		await expect(days).toHaveCount(2);
+		await expect(days.nth(0).getByRole('heading')).toHaveText('Fri Oct 10');
+		await expect(days.nth(1).getByRole('heading')).toHaveText('Thu Oct 9');
+		await expect(days.nth(1).getByTestId('play')).toHaveCount(2);
+		const row = days.nth(0).getByTestId('play');
+		await expect(row.locator('time')).toHaveText(/^\d{1,2}:\d{2} [AP]M$/);
+		await expect(row).not.toContainText('2025');
+		const link = row.getByRole('link', { name: 'How volcanoes work' });
+		await expect(link).toHaveAttribute('href', 'https://www.youtube.com/watch?v=abc');
+		await expect(link).toHaveAttribute('target', '_blank');
+		await expect(link).toHaveAttribute('rel', 'noopener');
+		await expect(row).toContainText('Finished the video');
+		expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+		if (shots) await page.screenshot({ path: `${shots}/history-days-${w}.png`, fullPage: true });
+	}
+});
