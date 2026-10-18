@@ -104,8 +104,8 @@ run "access_allows_only_the_parents" {
     error_message = "device bypass policy"
   }
   assert {
-    condition     = toset([for d in cloudflare_zero_trust_access_application.parent.destinations : d.uri]) == toset(["cubby.gantt.pub/parent", "cubby.gantt.pub/api/parent"])
-    error_message = "parent app covers /parent and /api/parent"
+    condition     = toset([for d in cloudflare_zero_trust_access_application.parent.destinations : d.uri]) == toset(["cubby.gantt.pub/parent", "cubby.gantt.pub/parent/*", "cubby.gantt.pub/api/parent"])
+    error_message = "parent app covers /parent, /parent/* and /api/parent"
   }
   assert {
     condition     = contains([for d in cloudflare_zero_trust_access_application.public.destinations : d.uri], "cubby.gantt.pub/watch") && !contains([for d in cloudflare_zero_trust_access_application.public.destinations : d.uri], "cubby.gantt.pub")
