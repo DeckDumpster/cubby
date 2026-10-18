@@ -176,12 +176,18 @@ async fn api_responses_are_never_cacheable_whatever_their_status() {
 }
 
 #[tokio::test]
-async fn the_spa_shell_is_revalidated_every_load() {
+async fn the_spa_shell_is_never_stored() {
     for path in ["/", "/index.html", "/watch/deep/link"] {
         let (status, h) = headers_of(path).await;
         assert_eq!(status, StatusCode::OK, "{path}");
-        assert_eq!(h["cache-control"], "no-cache", "{path}");
+        assert_eq!(h["cache-control"], "no-store", "{path}");
     }
+}
+
+#[tokio::test]
+async fn an_unknown_static_looking_path_is_html_that_no_edge_may_store() {
+    let (_, h) = headers_of("/thumbs-nope/x.jpg").await;
+    assert_eq!(h["cache-control"], "no-store");
 }
 
 #[tokio::test]
@@ -216,6 +222,17 @@ async fn a_thumb_the_worker_wrote_is_served_as_an_image_and_a_missing_one_is_404
             .unwrap()
             .contains("max-age=")
     );
+    let res = router
+        .clone()
+        .oneshot(
+            Request::get("/thumbs/abc.jpg?v=7")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-type"], "image/jpeg");
     let (status, body) = get(router, "/thumbs/missing.jpg").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(!body.contains("cubby shell"));

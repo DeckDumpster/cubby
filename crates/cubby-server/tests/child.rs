@@ -125,7 +125,10 @@ fn shape(v: &Value) -> Value {
 }
 
 fn fixture(name: &str) -> Value {
-    let p = format!("{}/../../web/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let p = format!(
+        "{}/../../web/tests/fixtures/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
 
@@ -140,7 +143,10 @@ async fn home_and_search_json_match_the_fixtures_the_page_parses() {
         .iter()
         .find(|s| s["key"] == "new")
         .unwrap();
-    assert_eq!(shape(new), shape(&fixture("child-home.json")["sections"][0]));
+    assert_eq!(
+        shape(new),
+        shape(&fixture("child-home.json")["sections"][0])
+    );
     let (_, search) = get(api(false), "/api/child/search?q=blue", true).await;
     assert_eq!(shape(&search), shape(&fixture("child-search.json")));
 }

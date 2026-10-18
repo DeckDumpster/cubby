@@ -68,7 +68,7 @@ fn tile(v: &VideoRow) -> Value {
         "title": v.title,
         "channel_title": v.channel_title,
         "duration_s": v.duration_s,
-        "thumb": v.thumb_path.as_ref().map(|p| format!("/thumbs/{p}")),
+        "thumb": v.thumb_path.as_ref().map(|p| format!("/thumbs/{p}?v={}", v.published_at)),
     })
 }
 
