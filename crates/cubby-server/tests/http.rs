@@ -208,6 +208,8 @@ async fn versioned_icons_are_immutable_and_the_manifest_is_cached_for_a_day() {
     let dir = web_dir();
     std::fs::create_dir_all(dir.join("assets/icons")).unwrap();
     std::fs::write(dir.join("assets/icons/icon-v1.png"), [0x89, b'P']).unwrap();
+    std::fs::write(dir.join("assets/icons/favicon-v1.ico"), [0, 0, 1, 0]).unwrap();
+    std::fs::write(dir.join("assets/icons/favicon-v1.svg"), "<svg/>").unwrap();
     std::fs::write(dir.join("assets/manifest.webmanifest"), "{}").unwrap();
     let router = app(&config(&dir, "")).unwrap();
     let cc = |path: &'static str| {
@@ -230,6 +232,24 @@ async fn versioned_icons_are_immutable_and_the_manifest_is_cached_for_a_day() {
     );
     let (st, v) = cc("/assets/manifest.webmanifest").await;
     assert_eq!((st, v.as_str()), (StatusCode::OK, "public, max-age=86400"));
+    let ctype = |path: &'static str| {
+        let router = router.clone();
+        async move {
+            let res = router
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            res.headers()["content-type"].to_str().unwrap().to_string()
+        }
+    };
+    assert_eq!(ctype("/assets/icons/icon-v1.png").await, "image/png");
+    assert!(ctype("/assets/icons/favicon-v1.ico").await.contains("icon"));
+    assert_eq!(ctype("/assets/icons/favicon-v1.svg").await, "image/svg+xml");
+    assert!(
+        ctype("/assets/manifest.webmanifest")
+            .await
+            .contains("manifest+json")
+    );
     let (_, v) = cc("/assets/icons/missing.png").await;
     assert_eq!(v, "no-store");
 }
