@@ -4,7 +4,7 @@
 //     stubbed by a local OIDC provider, YouTube by a local fake), every step;
 //   - e2e:smoke against a deployed instance (SMOKE_BASE_URL), where what a step needs and the
 //     environment lacks is skipped with its reason printed.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
 import { createServer } from 'node:net';
 import { PARENT_EMAIL, VIDEOS, HANDLE, startStack } from './stack.js';
@@ -213,20 +213,26 @@ test.describe('smoke walk, public base differs from the probe address', () => {
 	});
 	test.afterAll(() => stack?.stop());
 
+	// Async: the stack's fake provider lives in this process and must keep answering discovery.
 	const run = (publicBase) =>
-		spawnSync('npx', ['playwright', 'test', '-c', 'playwright.smoke.config.js', '-g', 'parent steps'], {
-			encoding: 'utf8',
-			env: { ...process.env, SMOKE_BASE_URL: stack.baseURL, SMOKE_PUBLIC_BASE_URL: publicBase }
+		new Promise((res) => {
+			const p = spawn('npx', ['playwright', 'test', '-c', 'playwright.smoke.config.js', '-g', 'parent steps'], {
+				env: { ...process.env, SMOKE_BASE_URL: stack.baseURL, SMOKE_PUBLIC_BASE_URL: publicBase }
+			});
+			let stdout = '';
+			p.stdout.on('data', (d) => (stdout += d));
+			p.stderr.on('data', (d) => (stdout += d));
+			p.on('close', (status) => res({ status, stdout, stderr: '' }));
 		});
 
-	test('passes when redirect_uri uses the configured public base', () => {
-		const r = run(PUBLIC);
+	test('passes when redirect_uri uses the configured public base', async () => {
+		const r = await run(PUBLIC);
 		console.log(r.stdout, r.stderr);
 		expect(r.status).toBe(0);
 	});
 
-	test('fails when the redirect host is wrong', () => {
-		const r = run('https://wrong.example.test');
+	test('fails when the redirect host is wrong', async () => {
+		const r = await run('https://wrong.example.test');
 		expect(r.status, 'a wrong redirect host must fail the smoke walk').not.toBe(0);
 		expect(r.stdout).toContain('/auth/callback');
 	});
