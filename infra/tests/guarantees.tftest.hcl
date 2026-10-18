@@ -106,3 +106,12 @@ run "access_allows_only_ryan" {
     error_message = "tunnel ingress"
   }
 }
+
+run "iam_principals_carry_the_deploy_boundary" {
+  command = plan
+
+  assert {
+    condition     = aws_iam_user.backup.permissions_boundary == "arn:aws:iam::189923011121:policy/terraform-deploy-boundary"
+    error_message = "every aws_iam_user must set the terraform-deploy-boundary permissions boundary"
+  }
+}
