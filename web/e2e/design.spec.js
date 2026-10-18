@@ -19,11 +19,11 @@ const HOME = {
 	remaining: { videos: 3, minutes: null },
 	total_videos: 5,
 	sections: [
-		{ key: 'new', title: 'New', items: MANY.slice(0, 3) },
-		{ key: 'all', title: 'All videos', items: MANY }
+		{ key: 'new', title: 'New', tiles: MANY.slice(0, 3) },
+		{ key: 'all', title: 'All videos', tiles: MANY }
 	]
 };
-const EMPTY = { child: { name: 'Kid' }, remaining: { videos: 3, minutes: null }, total_videos: 0, sections: [{ key: 'all', title: 'All videos', items: [] }] };
+const EMPTY = { child: { name: 'Kid' }, remaining: { videos: 3, minutes: null }, total_videos: 0, sections: [{ key: 'all', title: 'All videos', tiles: [] }] };
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
 const FAKE_PLAYER = () => {
@@ -55,8 +55,8 @@ async function setup(page, { home = HOME, play = { grant_id: 'g1', remaining: { 
 		if (path.endsWith('/play')) return json(play);
 		if (path.endsWith('/beat')) return json({ remaining: { videos: 2, minutes: null }, stop: false });
 		if (path.endsWith('/end')) return json({ ok: true });
-		if (path.endsWith('/next')) return json({ items: MANY.slice(1, 4), remaining: { videos: 2, minutes: null } });
-		if (path.endsWith('/search')) return json({ items: MANY.slice(0, 4) });
+		if (path.endsWith('/next')) return json({ tiles: MANY.slice(1, 4), remaining: { videos: 2, minutes: null } });
+		if (path.endsWith('/search')) return json({ tiles: MANY.slice(0, 4) });
 		return json({}, 404);
 	});
 }
