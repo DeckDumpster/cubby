@@ -105,6 +105,9 @@ test.describe('hermetic stack', () => {
 		await test.step('home shows the allowed video, and only it', async () => {
 			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
 			await expect(child.getByText(VIDEOS[SLIME].title)).toHaveCount(0);
+			await expect
+				.poll(() => child.locator('img.thumb').evaluateAll((imgs) => imgs.map((i) => i.naturalWidth)))
+				.toSatisfy((w) => w.length > 0 && w.every((n) => n > 0));
 		});
 
 		await test.step('search finds the allowed video and not the other', async () => {
