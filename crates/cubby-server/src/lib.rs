@@ -176,7 +176,35 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .fallback_service(spa)
         .layer(middleware::from_fn_with_state(sink, observe))
-        .layer(middleware::from_fn(capture_log_line)))
+        .layer(middleware::from_fn(capture_log_line))
+        .layer(middleware::from_fn(cache_control)))
+}
+
+/// No `/api/*` response is ever cached (errors and 401s included), and the SPA shell is always
+/// revalidated; the immutable `/_app` assets keep the long cache they are built with. Without
+/// this a browser heuristically caches a header-less response forever.
+async fn cache_control(req: Request, next: Next) -> Response {
+    let is_api = req.uri().path().starts_with("/api/");
+    let mut res = next.run(req).await;
+    let value = if is_api {
+        Some("no-store")
+    } else if res
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|t| t.starts_with("text/html"))
+    {
+        Some("no-cache")
+    } else {
+        None
+    };
+    if let Some(v) = value {
+        res.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static(v),
+        );
+    }
+    res
 }
 
 /// An unmounted `/api/*` path is a JSON 404, never the SPA shell with a 200.
