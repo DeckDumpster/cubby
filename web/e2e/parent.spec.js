@@ -94,7 +94,7 @@ test('each section is its own URL: open by URL or click, reload and back keep it
 	const here = async (key, heading) => {
 		await expect(page).toHaveURL(new RegExp(`/parent/${key}(\\?.*)?$`));
 		await expect(page.getByRole('heading', { level: 2 })).toContainText(heading);
-		await expect(page.getByRole('link', { current: 'page' })).toHaveAttribute('href', `/parent/${key}`);
+		await expect(page.locator('a.tab[aria-current="page"]')).toHaveAttribute('href', `/parent/${key}`);
 	};
 	await page.goto('/parent');
 	await here('allow', 'Allow a video');
