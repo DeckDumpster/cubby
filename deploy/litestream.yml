@@ -1,0 +1,21 @@
+# Litestream for cubby: directory mode over the data volume, so registry.sqlite and every
+# family-<ulid>.sqlite are discovered and replicated with no per-family config (copied and
+# adapted from pokedumpster's deploy/litestream.yml). thumbs/ is reproducible and not backed up.
+# Region is pinned so Litestream never calls GetBucketLocation, which the backup role lacks.
+# Retention is process-global and MUST stay top level: 4320h = 180 days of daily snapshots.
+logging:
+  level: info
+
+snapshot:
+  interval: 24h
+  retention: 4320h
+
+dbs:
+  - dir: /data
+    pattern: "*.sqlite"
+    watch: true
+    replicas:
+      - type: s3
+        bucket: cubby-backups
+        path: ${LITESTREAM_S3_PATH}
+        region: ${LITESTREAM_S3_REGION}
