@@ -3,8 +3,23 @@
 # tree, in a testenv container: `testenv --suites ci <branch> cubby`.
 set -euo pipefail
 
+# Every non-Rust tool a check in the gate uses goes on this list; the image has none of them.
+# A new check that calls a new tool adds it here, or it goes red only in the round.
+gate_tools=(jq dnsutils)
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+
+missing=()
+for t in "${gate_tools[@]}"; do
+    dpkg -s "$t" >/dev/null 2>&1 || missing+=("$t")
+done
+if [ "${#missing[@]}" -gt 0 ]; then
+    SUDO=""
+    [ "$(id -u)" -eq 0 ] || SUDO=sudo
+    $SUDO apt-get update -qq
+    $SUDO apt-get install -y -qq "${missing[@]}"
+fi
 
 if ! command -v npm >/dev/null 2>&1; then
     node_version=v22.22.1
