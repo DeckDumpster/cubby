@@ -119,6 +119,7 @@ export async function api(path, opts = {}) {
 		},
 		body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
 		signal: opts.signal,
+		cache: 'no-store',
 		keepalive: true
 	});
 	let data = null;
