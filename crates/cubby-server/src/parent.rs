@@ -33,6 +33,8 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/parent/policies/preview", post(preview))
         .route("/api/parent/policies/{id}", delete(remove_policy))
         .route("/api/parent/review", get(review))
+        .route("/api/parent/library", get(library))
+        .route("/api/parent/library/videos", get(library_videos))
         .route("/api/parent/videos/{id}/block", post(block))
         .route("/api/parent/videos/{id}/unblock", post(unblock))
         .route("/api/parent/videos/{id}/approve", post(approve))
@@ -305,6 +307,70 @@ async fn review(
             })
             .collect(),
     )))
+}
+
+#[derive(Deserialize)]
+struct LibraryQuery {
+    #[serde(default)]
+    view: String,
+    q: Option<String>,
+    child: Option<String>,
+    group: Option<String>,
+    policy: Option<String>,
+    #[serde(default)]
+    sort: String,
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+}
+
+impl LibraryQuery {
+    fn filter(&self) -> store::LibraryFilter {
+        store::LibraryFilter {
+            review: self.view == "review",
+            q: self.q.clone().filter(|q| !q.trim().is_empty()),
+            child: self.child.clone().filter(|c| !c.is_empty()),
+        }
+    }
+}
+
+/// The collapsed tree for the allow-list and review screens: groups and counts only.
+async fn library(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    Query(q): Query<LibraryQuery>,
+) -> Result<Json<Value>> {
+    let groups = store::library_groups(&conn(&s, &f)?, &q.filter())?;
+    Ok(Json(json!({"groups": groups.into_iter().map(|g| json!({
+        "key": g.key, "title": g.title, "count": g.count,
+        "playlists": g.playlists.into_iter().map(|p| json!({
+            "policy_id": p.policy_id, "kind": p.kind, "youtube_id": p.youtube_id,
+            "count": p.count})).collect::<Vec<_>>(),
+    })).collect::<Vec<_>>()})))
+}
+
+/// One page of a group's videos, with play count and watched seconds per video.
+async fn library_videos(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    Query(q): Query<LibraryQuery>,
+) -> Result<Json<Value>> {
+    let group = q.group.clone().ok_or_else(|| bad("a group is required"))?;
+    let limit = q.limit.unwrap_or(100).clamp(1, 200);
+    let (total, rows) = store::library_videos(
+        &conn(&s, &f)?,
+        &q.filter(),
+        &group,
+        q.policy.as_deref(),
+        &q.sort,
+        q.offset,
+        limit,
+    )?;
+    Ok(Json(json!({"total": total, "videos": rows.into_iter().map(|v| json!({
+        "youtube_id": v.youtube_id, "title": v.title, "channel_title": v.channel_title,
+        "policy_id": v.policy_id, "policy_kind": v.policy_kind,
+        "policy_youtube_id": v.policy_youtube_id, "child_id": v.child_id,
+        "plays": v.plays, "watched_s": v.watched_s})).collect::<Vec<_>>()})))
 }
 
 #[derive(Deserialize, Default)]

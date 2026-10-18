@@ -18,7 +18,6 @@ export type Child = {
 	};
 };
 export type Policy = { id: string; kind: string; youtube_id: string; child_id: string | null; title: string; pending?: boolean };
-export type Item = { youtube_id: string; title: string; channel_id: string | null; channel_title: string; policy_kind: string; policy_youtube_id: string };
 export type Req = { id: string; child_name: string; kind: string; title: string; channel_title: string; youtube_id: string };
 export type Grant = { id: string; title: string; youtube_id: string; granted_at: number; watched_s: number; charge: number; end_reason: string | null; thumb?: string | null };
 
@@ -27,13 +26,11 @@ export class ParentState {
 	error = $state('');
 	children: Child[] = $state([]);
 	policies: Policy[] = $state([]);
-	review: Item[] = $state([]);
 	requests: Req[] = $state([]);
 	parents: string[] = $state([]);
 	history: Grant[] = $state([]);
 	/** The child chosen in the URL (?child=<id>); empty means the first child. */
 	historyChildParam = $state('');
-	reviewChannel = $state('');
 
 	url = $state('');
 	addError = $state('');
@@ -44,7 +41,6 @@ export class ParentState {
 	forms: Record<string, { videos: string; minutes: string; windows: string; cutoff: boolean }> = $state({});
 
 	historyChild = $derived(this.historyChildParam || this.children[0]?.id || '');
-	channels = $derived([...new Map(this.review.filter((i) => i.channel_id).map((i) => [i.channel_id!, i.channel_title])).entries()]);
 
 	run = async (fn: () => Promise<unknown>) => {
 		this.error = '';
@@ -66,10 +62,6 @@ export class ParentState {
 					cutoff: c.budget.cutoff_mid_play
 				};
 			this.policies = await api('GET', '/api/parent/policies');
-			this.review = await api(
-				'GET',
-				'/api/parent/review' + (this.reviewChannel ? `?channel=${encodeURIComponent(this.reviewChannel)}` : '')
-			);
 			this.requests = await api('GET', '/api/parent/requests');
 			const parents = await api('GET', '/api/parent/parents');
 			this.parents = Array.isArray(parents) ? parents : [];

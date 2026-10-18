@@ -238,6 +238,169 @@ pub fn auto_allowed(conn: &Connection, channel: Option<&str>) -> Result<Vec<Auto
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct LibraryFilter {
+    pub review: bool,
+    /// Free text, matched with the FTS index over title, channel and tags.
+    pub q: Option<String>,
+    /// Scope the list and the play totals to one child.
+    pub child: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryGroup {
+    /// The channel id, `""` for videos with no known channel, or [`DIRECT_GROUP`].
+    pub key: String,
+    pub title: String,
+    pub count: i64,
+    pub playlists: Vec<LibrarySource>,
+}
+
+/// One allow policy that brought videos into a group.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibrarySource {
+    pub policy_id: String,
+    pub kind: String,
+    pub youtube_id: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryVideo {
+    pub youtube_id: String,
+    pub title: String,
+    pub channel_title: String,
+    pub policy_id: String,
+    pub policy_kind: String,
+    pub policy_youtube_id: String,
+    pub child_id: Option<String>,
+    pub plays: i64,
+    pub watched_s: f64,
+}
+
+/// The group holding videos allowed one by one.
+pub const DIRECT_GROUP: &str = "direct";
+
+/// Every (video, policy) pair the list shows, with the filter's FTS match applied. `?1` review,
+/// `?2` child scope, `?3` FTS query: all optional.
+const LIBRARY_ENTRIES: &str = "WITH e AS (
+    SELECT v.youtube_id AS youtube_id, v.title AS title, v.channel_title AS channel_title,
+           CASE WHEN p.kind='video' THEN 'direct' ELSE COALESCE(v.channel_id,'') END AS gkey,
+           p.id AS pid, p.kind AS pkind, p.youtube_id AS pyt, a.child_id AS child_id,
+           a.changed_at AS changed_at
+    FROM allowed_videos a
+    JOIN allow_policies p ON p.id=a.policy_id AND p.removed_at IS NULL
+    JOIN videos v ON v.youtube_id=a.youtube_id AND v.unavailable_at IS NULL
+    WHERE (a.state='auto-allowed' OR (?1=0 AND a.state='approved'))
+      AND (?2 IS NULL OR a.child_id IS NULL OR a.child_id=?2)
+      AND (?1=0 OR NOT EXISTS (SELECT 1 FROM allowed_videos b WHERE b.youtube_id=a.youtube_id
+                AND b.child_id IS a.child_id AND b.state='approved'))
+      AND NOT EXISTS (SELECT 1 FROM allowed_videos b WHERE b.youtube_id=a.youtube_id
+                AND b.state='blocked' AND (b.child_id IS NULL OR b.child_id IS a.child_id))
+      AND (?3 IS NULL OR v.rowid IN (SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?3))
+)";
+
+/// The collapsed tree: channels (and the directly-allowed group) with counts and the policies
+/// under each. Videos are fetched per group by [`library_videos`].
+pub fn library_groups(conn: &Connection, f: &LibraryFilter) -> Result<Vec<LibraryGroup>> {
+    let fts = f.q.as_deref().and_then(crate::browse::fts_query);
+    let args = params![f.review as i64, f.child, fts];
+    let mut s = conn.prepare(&format!(
+        "{LIBRARY_ENTRIES} SELECT gkey, MAX(channel_title), COUNT(*) FROM e GROUP BY gkey
+         ORDER BY gkey='direct' DESC, MAX(channel_title) COLLATE NOCASE, gkey"
+    ))?;
+    let mut groups: Vec<LibraryGroup> = s
+        .query_map(args, |r| {
+            Ok(LibraryGroup {
+                key: r.get(0)?,
+                title: r.get(1)?,
+                count: r.get(2)?,
+                playlists: vec![],
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut s = conn.prepare(&format!(
+        "{LIBRARY_ENTRIES} SELECT gkey, pid, pkind, pyt, COUNT(*) FROM e WHERE pkind!='video'
+         GROUP BY gkey, pid ORDER BY pkind, pyt"
+    ))?;
+    let sources = s.query_map(args, |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            LibrarySource {
+                policy_id: r.get(1)?,
+                kind: r.get(2)?,
+                youtube_id: r.get(3)?,
+                count: r.get(4)?,
+            },
+        ))
+    })?;
+    for row in sources {
+        let (key, src) = row?;
+        if let Some(g) = groups.iter_mut().find(|g| g.key == key) {
+            g.playlists.push(src);
+        }
+    }
+    Ok(groups)
+}
+
+/// One page of a group's videos with each video's play count and watched seconds, summed over
+/// `play_grants` (all children, or just `f.child`). `sort` is `title`, `plays` or `time`.
+pub fn library_videos(
+    conn: &Connection,
+    f: &LibraryFilter,
+    group: &str,
+    policy: Option<&str>,
+    sort: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<(i64, Vec<LibraryVideo>)> {
+    let fts = f.q.as_deref().and_then(crate::browse::fts_query);
+    let order = match sort {
+        "plays" => "plays DESC, title COLLATE NOCASE",
+        "time" => "watched DESC, title COLLATE NOCASE",
+        "title" | "" => "title COLLATE NOCASE, youtube_id",
+        other => return Err(DbError::Invalid(format!("unknown sort {other:?}"))),
+    };
+    let mut s = conn.prepare(&format!(
+        "{LIBRARY_ENTRIES}
+         SELECT e.youtube_id, e.title, e.channel_title, e.pid, e.pkind, e.pyt, e.child_id,
+                COALESCE(g.n,0) AS plays, COALESCE(g.t,0) AS watched, COUNT(*) OVER ()
+         FROM e LEFT JOIN (SELECT youtube_id, COUNT(*) AS n, SUM(COALESCE(watched_s,0)) AS t
+                           FROM play_grants WHERE ?2 IS NULL OR child_id=?2 GROUP BY youtube_id) g
+              ON g.youtube_id=e.youtube_id
+         WHERE e.gkey=?4 AND (?5 IS NULL OR e.pid=?5)
+         ORDER BY {order} LIMIT ?6 OFFSET ?7"
+    ))?;
+    let mut total = 0;
+    let rows = s.query_map(
+        params![
+            f.review as i64,
+            f.child,
+            fts,
+            group,
+            policy,
+            limit as i64,
+            offset as i64
+        ],
+        |r| {
+            total = r.get(9)?;
+            Ok(LibraryVideo {
+                youtube_id: r.get(0)?,
+                title: r.get(1)?,
+                channel_title: r.get(2)?,
+                policy_id: r.get(3)?,
+                policy_kind: r.get(4)?,
+                policy_youtube_id: r.get(5)?,
+                child_id: r.get(6)?,
+                plays: r.get(7)?,
+                watched_s: r.get(8)?,
+            })
+        },
+    )?;
+    let videos: Vec<LibraryVideo> = rows.collect::<rusqlite::Result<_>>()?;
+    Ok((total, videos))
+}
+
 pub fn open_requests(conn: &Connection) -> Result<Vec<OpenRequest>> {
     let mut s = conn.prepare(
         "SELECT q.id, q.child_id, c.name, q.kind, q.youtube_id, COALESCE(v.title,''),
@@ -690,5 +853,38 @@ mod tests {
             ("Cyrus", "🐻", "UTC")
         );
         assert!(!update_child(&c, "ghost", "x", "", "UTC").unwrap());
+    }
+
+    #[test]
+    fn the_library_groups_by_channel_counts_plays_and_searches() {
+        let c = mem();
+        add_policy(&c, "channel", "ch1", None, 5).unwrap();
+        add_policy(&c, "video", "w1", None, 5).unwrap();
+        c.execute_batch(
+            "INSERT INTO devices(id,child_id,token_hash,paired_at) VALUES ('d','a',x'01',0);
+             INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,watched_s)
+               VALUES ('g1','a','d','v1',10,60),('g2','a','d','v1',20,30),('g3','b','d','v1',30,10);",
+        )
+        .unwrap();
+        let f = LibraryFilter::default();
+        let g = library_groups(&c, &f).unwrap();
+        assert_eq!(
+            g.iter().map(|g| (g.key.as_str(), g.count)).collect::<Vec<_>>(),
+            [("direct", 1), ("ch1", 3)]
+        );
+        assert_eq!(g[1].playlists.len(), 1);
+        let (total, v) = library_videos(&c, &f, "ch1", None, "plays", 0, 2).unwrap();
+        assert_eq!((total, v.len()), (3, 2));
+        assert_eq!((v[0].youtube_id.as_str(), v[0].plays, v[0].watched_s), ("v1", 3, 100.0));
+        let one = LibraryFilter { child: Some("a".into()), ..f.clone() };
+        let (_, v) = library_videos(&c, &one, "ch1", None, "time", 0, 10).unwrap();
+        assert_eq!((v[0].plays, v[0].watched_s), (2, 90.0));
+        let q = LibraryFilter { q: Some("thr".into()), ..f.clone() };
+        let g = library_groups(&c, &q).unwrap();
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].count, 1);
+        let rev = LibraryFilter { review: true, ..f };
+        assert_eq!(library_groups(&c, &rev).unwrap().len(), 1);
+        assert!(library_videos(&c, &rev, "ch1", None, "bogus", 0, 1).is_err());
     }
 }
