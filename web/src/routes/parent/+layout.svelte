@@ -33,6 +33,7 @@
 <div class="parent">
 <header class="bar">
 	<h1><span class="logo" aria-hidden="true">C</span> Cubby <small>parent</small></h1>
+	<a class="signout" href="/cdn-cgi/access/logout">Sign out</a>
 </header>
 <nav class="tabs" aria-label="Sections">
 	{#each sections as [key, label] (key)}
@@ -50,7 +51,8 @@
 	@media (min-width: 640px) { .parent { padding: 0 var(--space-5) var(--space-5); } }
 	.parent :global {
 
-		.bar { padding: var(--space-4) 0 var(--space-2); }
+		.bar { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) 0 var(--space-2); }
+		.signout { color: var(--muted); font-size: 0.9rem; }
 		h1 { display: flex; align-items: center; gap: var(--space-2); font-size: 1.4rem; margin: 0; letter-spacing: -0.01em; }
 		h1 small { font-size: 0.85rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; }
 		.logo { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 9px; background: var(--accent); color: var(--accent-text); font-weight: 800; }
