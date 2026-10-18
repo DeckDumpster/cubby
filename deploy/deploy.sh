@@ -54,6 +54,18 @@ if ! grep -q '^CUBBY_YT_API_KEY=' "$cfg_dir/server.env" && grep -q '^CUBBY_YT_AP
     grep '^CUBBY_YT_API_KEY=' "$cfg_dir/worker.env" >> "$cfg_dir/server.env"
 fi
 
+# Metrics: the OTLP receiver (VictoriaMetrics) on this host, named in deploy/otlp-endpoint and
+# reached from the containers through the host alias. Set in both env files on every deploy.
+otlp="$(tr -d '[:space:]' < "$root/deploy/otlp-endpoint")"
+set_env() {
+    local f="$cfg_dir/$1" tmp
+    tmp="$(mktemp "$f.XXXXXX")"
+    { grep -v '^CUBBY_OTLP_ENDPOINT=' "$f" || true; echo "CUBBY_OTLP_ENDPOINT=$otlp"; } >"$tmp"
+    chmod 0600 "$tmp"; mv "$tmp" "$f"
+}
+set_env server.env
+set_env worker.env
+
 # Restart a unit; on failure print podman's own error (not a pointer to journalctl) and exit non-zero.
 restart() {
     if run systemctl --user restart "$1"; then return 0; fi

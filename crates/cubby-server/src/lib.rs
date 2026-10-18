@@ -13,7 +13,7 @@ pub mod child;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{MatchedPath, Request, State};
 use axum::http::StatusCode;
@@ -175,7 +175,8 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
         .merge(identity::routes(state))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .fallback_service(spa)
-        .layer(middleware::from_fn_with_state(sink, record_latency)))
+        .layer(middleware::from_fn_with_state(sink, observe))
+        .layer(middleware::from_fn(capture_log_line)))
 }
 
 /// An unmounted `/api/*` path is a JSON 404, never the SPA shell with a 200.
@@ -187,11 +188,70 @@ async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
-async fn record_latency(
-    State(sink): State<Arc<MetricsSink>>,
-    req: Request,
-    next: Next,
-) -> Response {
+/// Who a request was made by, filled by the guards (`device:<id>` or `parent:<email>`) so the
+/// request log can name it. Never a token.
+#[derive(Clone, Default)]
+pub(crate) struct Actor(Arc<std::sync::Mutex<Option<String>>>);
+
+impl Actor {
+    pub(crate) fn set(&self, who: String) {
+        if let Ok(mut g) = self.0.lock() {
+            *g = Some(who);
+        }
+    }
+
+    fn get(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|g| g.clone())
+    }
+}
+
+/// Where request log lines go: stderr, which journald collects.
+pub type LogSink = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Writes one JSON line per request: method, route template (never the raw path, which can carry
+/// ids), status, latency, the actor and, for a refusal, its message. No header, body or token.
+async fn log_request(sink: Option<&LogSink>, mut req: Request, next: Next) -> Response {
+    let route = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| "spa".to_string(), |m| m.as_str().to_string());
+    let method = req.method().to_string();
+    let actor = Actor::default();
+    req.extensions_mut().insert(actor.clone());
+    let start = Instant::now();
+    let res = next.run(req).await;
+    let mut line = json!({
+        "ts": SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+        "method": method,
+        "route": route,
+        "status": res.status().as_u16(),
+        "ms": start.elapsed().as_millis() as u64,
+    });
+    if let Some(who) = actor.get() {
+        line["actor"] = who.into();
+    }
+    if let Some(cause) = res.extensions().get::<error::ErrorCause>() {
+        line["error"] = cause.0.clone().into();
+    }
+    let text = format!("cubby-server: request {line}");
+    match sink {
+        Some(f) => f(&text),
+        None => eprintln!("{text}"),
+    }
+    res
+}
+
+async fn capture_log_line(req: Request, next: Next) -> Response {
+    let sink = req.extensions().get::<LogSink>().cloned();
+    log_request(sink.as_ref(), req, next).await
+}
+
+/// Same as [`app`], but request lines go to `log` instead of stderr (tests read them).
+pub fn app_with_log(config: &Config, log: LogSink) -> Result<Router, String> {
+    Ok(app(config)?.layer(axum::Extension(log)))
+}
+
+async fn observe(State(sink): State<Arc<MetricsSink>>, req: Request, next: Next) -> Response {
     let route = req
         .extensions()
         .get::<MatchedPath>()
@@ -202,11 +262,9 @@ async fn record_latency(
         let seconds = start.elapsed().as_secs_f64();
         let status = res.status().as_u16().to_string();
         tokio::task::spawn_blocking(move || {
-            sink.push_seconds(
-                "cubby_http_request_seconds",
-                seconds,
-                &[("route", &route), ("status", &status)],
-            );
+            let labels = [("route", route.as_str()), ("status", status.as_str())];
+            sink.push_seconds("cubby_http_request_seconds", seconds, &labels);
+            sink.push_count("cubby_http_requests", &labels);
         });
     }
     res

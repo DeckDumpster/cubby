@@ -94,3 +94,65 @@ async fn an_empty_endpoint_sends_nothing() {
     let (status, _) = get(app(&config(&web_dir(), "")).unwrap(), "/healthz").await;
     assert_eq!(status, StatusCode::OK);
 }
+
+fn logged(config: &Config) -> (axum::Router, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keep = lines.clone();
+    let log: cubby_server::LogSink = std::sync::Arc::new(move |l: &str| {
+        keep.lock().unwrap().push(l.to_string());
+    });
+    (cubby_server::app_with_log(config, log).unwrap(), lines)
+}
+
+#[tokio::test]
+async fn a_request_logs_one_line_with_route_and_status_and_no_secret() {
+    let (router, lines) = logged(&config(&web_dir(), ""));
+    let res = router
+        .oneshot(
+            Request::post("/api/parent/devices/dev-123/revoke")
+                .header("authorization", "Bearer SECRET-TOKEN-abc")
+                .header("cf-access-jwt-assertion", "SECRET-JWT-xyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let lines = lines.lock().unwrap();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = &lines[0];
+    assert!(
+        line.contains(r#""route":"/api/parent/devices/{id}/revoke""#),
+        "{line}"
+    );
+    assert!(line.contains(r#""status":401"#), "{line}");
+    assert!(line.contains(r#""method":"POST""#), "{line}");
+    assert!(
+        line.contains("Cloudflare Access is not configured"),
+        "{line}"
+    );
+    for secret in ["SECRET", "dev-123"] {
+        assert!(!line.contains(secret), "{secret} leaked: {line}");
+    }
+}
+
+#[tokio::test]
+async fn metrics_reach_a_fixture_otlp_endpoint_by_route_status_and_auth_reason() {
+    let f = cubby_otel::fake::FakeSink::start();
+    let app = app(&config(&web_dir(), &f.addr)).unwrap();
+    let res = app
+        .oneshot(Request::get("/api/child/me").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let reqs = tokio::task::spawn_blocking(move || {
+        let reqs = f.wait_for("cubby_http_requests");
+        let auth = f.wait_for("cubby_device_auth");
+        (reqs, auth)
+    })
+    .await
+    .unwrap();
+    assert_eq!(reqs.0[0].label("route"), Some("/api/child/me"));
+    assert_eq!(reqs.0[0].label("status"), Some("401"));
+    assert_eq!(reqs.1[0].label("outcome"), Some("missing"));
+}

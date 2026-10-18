@@ -5,6 +5,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
+/// The message of a refusal, kept on the response so the request log can say why.
+#[derive(Clone)]
+pub(crate) struct ErrorCause(pub(crate) String);
+
 #[derive(Debug)]
 pub struct ApiError(pub StatusCode, pub String);
 
@@ -24,6 +28,9 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.0, Json(json!({"error": self.1}))).into_response()
+        let cause = ErrorCause(self.1.clone());
+        let mut res = (self.0, Json(json!({"error": self.1}))).into_response();
+        res.extensions_mut().insert(cause);
+        res
     }
 }
