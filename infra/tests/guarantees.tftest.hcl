@@ -115,3 +115,30 @@ run "iam_principals_carry_the_deploy_boundary" {
     error_message = "every aws_iam_user must set the terraform-deploy-boundary permissions boundary"
   }
 }
+
+run "fastmail_dns_is_declared_exactly_and_unproxied" {
+  command = plan
+
+  assert {
+    condition = toset([
+      for r in values(cloudflare_dns_record.zone) : "${r.name} ${r.type} ${r.priority == null ? "" : r.priority} ${r.content}"
+      ]) == toset([
+      "gantt.pub MX 10 in1-smtp.messagingengine.com",
+      "gantt.pub MX 20 in2-smtp.messagingengine.com",
+      "gantt.pub TXT  \"v=spf1 include:spf.messagingengine.com ?all\"",
+      "fm1._domainkey.gantt.pub CNAME  fm1.gantt.pub.dkim.fmhosted.com",
+      "fm2._domainkey.gantt.pub CNAME  fm2.gantt.pub.dkim.fmhosted.com",
+      "fm3._domainkey.gantt.pub CNAME  fm3.gantt.pub.dkim.fmhosted.com",
+      "_dmarc.gantt.pub TXT  \"v=DMARC1; p=none;\"",
+    ])
+    error_message = "every Fastmail record must be present exactly"
+  }
+  assert {
+    condition     = alltrue([for r in values(cloudflare_dns_record.zone) : r.proxied == false])
+    error_message = "mail records must be unproxied"
+  }
+  assert {
+    condition     = cloudflare_dns_record.cubby.proxied == true
+    error_message = "cubby's own record is proxied"
+  }
+}
