@@ -191,3 +191,24 @@ test('History groups plays under a day heading with time-only rows linking to th
 		if (shots) await page.screenshot({ path: `${shots}/history-days-${w}.png`, fullPage: true });
 	}
 });
+
+for (const scheme of ['light', 'dark'])
+	for (const [w, h] of [[390, 844], [1280, 800]])
+		for (const n of [0, 1, 3])
+			test(`children: Pair a device clears the device list (${n} devices, ${scheme} ${w}px)`, async ({ page }) => {
+				await page.emulateMedia({ colorScheme: scheme });
+				await page.setViewportSize({ width: w, height: h });
+				const kids = [{ ...CHILDREN[1], devices: Array.from({ length: n }, (_, i) => ({ id: 'd' + i, label: 'Device ' + i, revoked_at: null })) }];
+				await page.route('**/api/parent/**', (route) => route.fulfill({ json: route.request().url().includes('/children') ? kids : [] }));
+				await page.goto('/parent/children');
+				const btn = page.getByRole('button', { name: 'Pair a device' });
+				await expect(btn).toBeVisible();
+				const gap = await page.evaluate(() => {
+					const ul = document.querySelector('.card ul.list');
+					const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Pair a device');
+					const token = parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.75;
+					return { gap: b.getBoundingClientRect().top - ul.getBoundingClientRect().bottom, token };
+				});
+				expect(gap.gap).toBeGreaterThanOrEqual(gap.token - 0.5);
+				if (shots) await page.screenshot({ path: `${shots}/children-${n}dev-${scheme}-${w}.png`, fullPage: true });
+			});
