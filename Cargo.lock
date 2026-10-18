@@ -243,6 +243,7 @@ dependencies = [
  "cubby-core",
  "cubby-db",
  "cubby-otel",
+ "cubby-worker",
  "cubby-yt",
  "http-body-util",
  "jsonwebtoken",

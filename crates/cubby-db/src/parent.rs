@@ -17,6 +17,9 @@ pub struct Policy {
     pub added_at: i64,
     /// The video or channel title when its metadata is known, else empty.
     pub title: String,
+    /// True until the worker (or the allow request) has ingested what the policy names: the
+    /// video's metadata, or any video a channel or playlist expands to.
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,7 +149,11 @@ pub fn list_policies(conn: &Connection) -> Result<Vec<Policy>> {
             COALESCE(CASE p.kind
               WHEN 'video' THEN (SELECT title FROM videos WHERE youtube_id=p.youtube_id)
               WHEN 'channel' THEN (SELECT channel_title FROM videos WHERE channel_id=p.youtube_id LIMIT 1)
-            END, '')
+            END, ''),
+            CASE p.kind
+              WHEN 'video' THEN NOT EXISTS (SELECT 1 FROM videos WHERE youtube_id = p.youtube_id)
+              ELSE NOT EXISTS (SELECT 1 FROM allowed_videos a WHERE a.policy_id = p.id)
+            END
          FROM allow_policies p WHERE p.removed_at IS NULL ORDER BY p.added_at, p.id",
     )?;
     let rows = s.query_map([], |r| {
@@ -157,6 +164,7 @@ pub fn list_policies(conn: &Connection) -> Result<Vec<Policy>> {
             child_id: r.get(3)?,
             added_at: r.get(4)?,
             title: r.get(5)?,
+            pending: r.get(6)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)

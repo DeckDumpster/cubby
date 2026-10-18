@@ -214,7 +214,8 @@ async fn policies(
         rows.into_iter()
             .map(|p| {
                 json!({"id": p.id, "kind": p.kind, "youtube_id": p.youtube_id,
-                    "child_id": p.child_id, "added_at": p.added_at, "title": p.title})
+                    "child_id": p.child_id, "added_at": p.added_at, "title": p.title,
+                    "pending": p.pending})
             })
             .collect(),
     )))
@@ -254,6 +255,18 @@ async fn add_policy(
         b.child_id.as_deref(),
         unix_now(),
     )?;
+    // Ingest before answering so the child sees the video at once; a failure here leaves the
+    // policy pending for the worker's next pass.
+    if let Some(ingest) = s.ingest.clone() {
+        let state = s.clone();
+        let family = f.0.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Ok(c) = open_own(&state, &family) {
+                ingest(&c);
+            }
+        })
+        .await;
+    }
     Ok(Json(
         json!({"id": id, "kind": r.kind.as_str(), "youtube_id": r.youtube_id}),
     ))

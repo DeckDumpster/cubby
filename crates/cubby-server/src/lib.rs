@@ -40,6 +40,9 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Cloudflare Access settings; without them every parent route refuses.
     pub access: Option<AccessConfig>,
+    /// YouTube Data API key; with it, allowing a link ingests its metadata before the request
+    /// returns. Empty leaves that to the worker's timer.
+    pub yt_api_key: String,
 }
 
 impl Config {
@@ -86,6 +89,10 @@ impl Config {
         };
         Ok(Config {
             access,
+            yt_api_key: get("CUBBY_YT_API_KEY")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
             data_dir: get("CUBBY_DATA_DIR")
                 .unwrap_or_else(|| "data".into())
                 .into(),
@@ -105,7 +112,11 @@ pub(crate) struct AppState {
     pub access: Option<access::AccessState>,
     pub sink: Arc<MetricsSink>,
     pub pair_limiter: ratelimit::RateLimiter,
+    pub ingest: Option<Ingest>,
 }
+
+/// Runs one metadata pass over a family's database; called when a parent allows a link.
+pub type Ingest = Arc<dyn Fn(&rusqlite::Connection) + Send + Sync>;
 
 impl AppState {
     /// Fire-and-forget counter push; never blocks or fails the request.
@@ -128,6 +139,22 @@ pub async fn check_access(config: &Config) -> Result<(), String> {
 }
 
 pub fn app(config: &Config) -> Result<Router, String> {
+    let ingest: Option<Ingest> = (!config.yt_api_key.is_empty()).then(|| {
+        let key = config.yt_api_key.clone();
+        let thumbs = config.data_dir.join("thumbs");
+        Arc::new(move |conn: &rusqlite::Connection| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            let transport = cubby_yt::HttpTransport::new(&key);
+            cubby_worker::run_pass(conn, &transport, now, Some(&thumbs));
+        }) as Ingest
+    });
+    app_with_ingest(config, ingest)
+}
+
+/// [`app`] with the allow-time metadata pass supplied by the caller (tests pass a fixture one).
+pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router, String> {
     let registry = cubby_db::Registry::open(&config.data_dir)
         .map_err(|e| format!("open registry in {}: {e}", config.data_dir.display()))?;
     let sink = Arc::new(MetricsSink::new(
@@ -139,6 +166,7 @@ pub fn app(config: &Config) -> Result<Router, String> {
         access: config.access.as_ref().map(access::AccessState::new),
         sink: sink.clone(),
         pair_limiter: ratelimit::RateLimiter::new(5, 60),
+        ingest,
     });
     let spa =
         ServeDir::new(&config.web_dir).fallback(ServeFile::new(config.web_dir.join("index.html")));

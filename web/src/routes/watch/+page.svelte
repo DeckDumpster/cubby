@@ -277,6 +277,9 @@
 					<div class="grid">{#each results as t (t.youtube_id)}{@render tile(t)}{/each}</div>
 				</section>
 			{:else}
+				{#if sections.every((s) => s.items.length === 0)}
+					<p class="empty" data-testid="nothing-allowed">Nothing is allowed yet. Ask a grown-up to add some videos.</p>
+				{/if}
 				{#each sections as s (s.key)}
 					{#if s.items.length}
 						<section>
