@@ -5,7 +5,8 @@ Wants=network-online.target
 
 [Container]
 Image=localhost/cubby:latest
-EnvironmentFile=-%h/.config/cubby/server.env
+# deploy.sh creates it empty (0600) when absent: Quadlet has no optional "-" prefix here.
+EnvironmentFile=%h/.config/cubby/server.env
 # Loopback only: the Cloudflare tunnel is the sole way in.
 PublishPort=127.0.0.1:8790:8790
 Volume=cubby-data:/data:Z

@@ -24,6 +24,20 @@ grep -q '^Network=host' cubby-cloudflared.container || fail "cloudflared must us
 grep -q '^EnvironmentFile=.*cloudflared.env' cubby-cloudflared.container || fail "cloudflared env file"
 if grep -qi 'TUNNEL_TOKEN=.\+\|--token' cubby-cloudflared.container; then fail "token inline in unit"; fi
 
+# --- Quadlet accepts no optional "-" prefix on EnvironmentFile=: it turns it into a relative path
+# and podman exits 125. Static check always; render with the real generator when it is installed.
+if grep -n '^EnvironmentFile=-' *.container; then fail "EnvironmentFile= with '-' prefix in a .container"; fi
+quadlet=/usr/libexec/podman/quadlet
+if [ -x "$quadlet" ]; then
+    q="$(mktemp -d)"; cp *.container "$q/"
+    out="$(QUADLET_UNIT_DIRS="$q" "$quadlet" -user -dryrun 2>&1)" || fail "quadlet generator failed: $out"
+    printf '%s\n' "$out" | grep -q -- '--env-file' || fail "quadlet rendered no --env-file"
+    printf '%s\n' "$out" | grep -o -- '--env-file [^ ]*' | grep -Ev -- '--env-file (/|%h/)' && fail "unresolvable (relative) env-file path"
+    rm -rf "$q"
+else
+    echo "quadlet generator not installed: static check only"
+fi
+
 # --- Deploy is idempotent: running the install step twice leaves identical files.
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
 for i in 1 2; do CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$t" ./deploy.sh >/dev/null; done
@@ -34,4 +48,5 @@ cmp "$t.sum1" "$t.sum2" || fail "deploy not idempotent"
 [ -f "$t/containers/systemd/cubby-litestream.container" ] || fail "litestream unit not installed"
 [ -f "$t/containers/systemd/cubby-cloudflared.container" ] || fail "cloudflared unit not installed"
 rm -f "$t.sum1" "$t.sum2"
+[ -f "$t/cubby/server.env" ] || fail "server.env not created"
 echo "deploy artefacts ok"
