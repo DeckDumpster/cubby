@@ -38,6 +38,15 @@ else
     echo "quadlet generator not installed: static check only"
 fi
 
+# --- Deploy refuses on a host that is not the declared prod host, before touching anything.
+[ "$(tr -d '[:space:]' < prod-host)" = ubuntu-mini-0 ] || fail "prod-host is not ubuntu-mini-0"
+rh="$(mktemp -d)"
+if out="$(CUBBY_DEPLOY_HOSTNAME=agent-swarm-test XDG_CONFIG_HOME="$rh" ./deploy.sh 2>&1)"; then fail "deploy ran on a non-prod host"; fi
+case "$out" in *"Cubby production is 'ubuntu-mini-0'"*) ;; *) fail "refusal does not name the reason: $out";; esac
+[ -z "$(ls -A "$rh")" ] || fail "refused deploy still wrote files"
+rm -rf "$rh"
+export CUBBY_DEPLOY_HOSTNAME=ubuntu-mini-0
+
 # --- Access settings: an empty server.env with no Terraform makes deploy refuse, naming all three;
 # a deploy from scratch with Terraform outputs available ends with them set.
 a="$(mktemp -d)"; fakebin="$(mktemp -d)"
