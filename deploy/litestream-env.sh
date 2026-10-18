@@ -5,7 +5,7 @@ set -euo pipefail
 
 cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/cubby"
 secret="${CUBBY_BACKUPS_SECRET:-cubby/litestream}"
-region="${LITESTREAM_S3_REGION:?set LITESTREAM_S3_REGION to the stack's BucketRegion output}"
+region="${LITESTREAM_S3_REGION:?set LITESTREAM_S3_REGION to the BucketRegion stack output}"
 path="${LITESTREAM_S3_PATH:-cubby}"
 
 mkdir -p "$cfg_dir"
