@@ -103,7 +103,7 @@ test.describe('hermetic stack', () => {
 			await expect(child.getByLabel('pairing code')).toHaveCount(0);
 		});
 
-		await test.step('home shows the allowed video and the handle channel's, and no other', async () => {
+		await test.step('home shows the allowed video and the handle channel video, and no other', async () => {
 			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
 			await expect(child.getByText(VIDEOS[SLIME].title)).toHaveCount(0);
 			await expect(child.getByRole('button', { name: VIDEOS[HANDLE.video].title }).first()).toBeVisible();
