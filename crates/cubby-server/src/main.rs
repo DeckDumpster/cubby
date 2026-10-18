@@ -9,6 +9,29 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("family") {
+        if let Err(e) =
+            cubby_server::family_cli::run(&config.data_dir, &args[1..], &mut std::io::stdout())
+        {
+            eprintln!("cubby-server: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Some(email) = std::env::var("CUBBY_BOOTSTRAP_PARENT")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        match cubby_server::family_cli::bootstrap(&config.data_dir, &email) {
+            Ok(true) => eprintln!("cubby-server: bootstrapped a family for {}", email.trim()),
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("cubby-server: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     if let Err(e) = cubby_server::check_access(&config).await {
         eprintln!("cubby-server: {e}");
         std::process::exit(1);

@@ -66,6 +66,10 @@ async fn jwks_server() -> String {
 }
 
 async fn env_with(access: bool, otlp: &str) -> Env {
+    env_build(access, otlp, true).await
+}
+
+async fn env_build(access: bool, otlp: &str, provision: bool) -> Env {
     let dir = temp_dir();
     let jwks = if access {
         jwks_server().await
@@ -84,7 +88,11 @@ async fn env_with(access: bool, otlp: &str) -> Env {
     .unwrap();
     let data = dir.join("data");
     let mut registry = Registry::open(&data).unwrap();
-    let family_id = registry.create_family(PARENT).unwrap().id;
+    let family_id = if provision {
+        registry.create_family(PARENT).unwrap().id
+    } else {
+        String::new()
+    };
     drop(registry);
     let router = app(&cfg).unwrap();
     Env {
@@ -595,4 +603,53 @@ async fn play_beat_and_http_telemetry_reach_the_otlp_sink() {
     assert!(charge[0].value > 0.0 && charge[0].label("child") == Some("c1"));
 
     assert!(!f.wait_for("cubby_http_request_seconds").is_empty());
+}
+
+#[tokio::test]
+async fn the_family_cli_creates_a_family_an_access_request_is_then_accepted_for() {
+    let e = env_build(true, "", false).await;
+    let data = e.dir.join("data");
+    let jwt = good_jwt(PARENT);
+    let (s, _) = e.parent_post(PAIRING, Some(&jwt)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "no family yet");
+
+    let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let mut out = Vec::new();
+    cubby_server::family_cli::run(&data, &args(&["create", "Mum@Example.com"]), &mut out).unwrap();
+    let line = String::from_utf8(out).unwrap();
+    assert!(line.trim_end().ends_with("\tmum@example.com"), "{line}");
+
+    let fam = Registry::open(&data)
+        .unwrap()
+        .lookup(PARENT)
+        .unwrap()
+        .unwrap();
+    ident::add_child(
+        &Registry::open(&data).unwrap().open_family(&fam.id).unwrap(),
+        "c1",
+        "Ada",
+        "Europe/London",
+    )
+    .unwrap();
+    let (s, body) = e.parent_post(PAIRING, Some(&jwt)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+
+    let mut out = Vec::new();
+    cubby_server::family_cli::run(&data, &args(&["list"]), &mut out).unwrap();
+    assert!(String::from_utf8(out).unwrap().contains(&fam.id));
+    assert!(
+        cubby_server::family_cli::run(&data, &args(&["create", PARENT]), &mut Vec::new()).is_err(),
+        "a second create for the same email is refused"
+    );
+    assert!(cubby_server::family_cli::run(&data, &args(&["bogus"]), &mut Vec::new()).is_err());
+}
+
+#[tokio::test]
+async fn bootstrap_creates_a_family_only_into_an_empty_registry() {
+    let e = env_build(true, "", false).await;
+    let data = e.dir.join("data");
+    assert!(cubby_server::family_cli::bootstrap(&data, PARENT).unwrap());
+    assert!(!cubby_server::family_cli::bootstrap(&data, PARENT).unwrap());
+    assert!(!cubby_server::family_cli::bootstrap(&data, "other@example.com").unwrap());
+    assert_eq!(Registry::open(&data).unwrap().list().unwrap().len(), 1);
 }

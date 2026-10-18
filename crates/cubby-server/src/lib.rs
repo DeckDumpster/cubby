@@ -3,6 +3,7 @@
 
 pub mod access;
 mod error;
+pub mod family_cli;
 mod identity;
 mod parent;
 pub mod play;
