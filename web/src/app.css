@@ -45,8 +45,8 @@
 	box-sizing: border-box;
 }
 
-/* Only the parent UI adopts the tokens for now; /watch keeps its own look until its own bead. */
-body:has(.parent) {
+/* One token set for /parent and /watch. */
+body {
 	color-scheme: light dark;
 	margin: 0;
 	background: var(--bg);
