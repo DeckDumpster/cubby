@@ -181,8 +181,8 @@ pub fn app_with_ingest(config: &Config, ingest: Option<Ingest>) -> Result<Router
         .layer(middleware::from_fn(cache_control)))
 }
 
-/// Thumbnails are cached for a year; no `/api/*` response is ever cached (errors and 401s included), and the SPA shell is always
-/// revalidated; the immutable `/_app` assets keep the long cache they are built with. Without
+/// Thumbnails are cached for a year; no `/api/*` response is ever cached (errors and 401s included), and every HTML response (the SPA shell
+/// included) is `no-store`, so a CDN that caches by extension can never keep it as a static file; the immutable `/_app` assets keep the long cache they are built with. Without
 /// this a browser heuristically caches a header-less response forever.
 async fn cache_control(req: Request, next: Next) -> Response {
     let is_api = req.uri().path().starts_with("/api/");
@@ -203,7 +203,7 @@ async fn cache_control(req: Request, next: Next) -> Response {
         .and_then(|v| v.to_str().ok())
         .is_some_and(|t| t.starts_with("text/html"))
     {
-        Some("no-cache")
+        Some("no-store")
     } else {
         None
     };
