@@ -36,3 +36,21 @@ for (const scheme of ['light', 'dark'])
 				if (shots) await page.screenshot({ path: `${shots}/${scheme}-${w}-${t.split(' ')[0].replace('-', '')}.png`, fullPage: true });
 			}
 		});
+
+test('a failed add keeps the typed link and shows the error beside it', async ({ page }) => {
+	const MSG = 'that is not a YouTube video, channel or playlist link';
+	await page.route('**/api/parent/**', (route) => {
+		const u = route.request().url();
+		if (route.request().method() === 'POST' && u.includes('/policies'))
+			return route.fulfill({ status: 400, json: { error: MSG } });
+		return route.fulfill({ json: u.includes('/children') ? CHILDREN : u.includes('/policies') ? POLICIES : [] });
+	});
+	await page.goto('/parent');
+	const input = page.getByPlaceholder('Paste a YouTube link');
+	await input.fill('https://example.com/nope');
+	await page.getByRole('button', { name: 'Check' }).click();
+	await expect(page.getByRole('alert')).toContainText(MSG);
+	await expect(input).toHaveValue('https://example.com/nope');
+	await input.fill('https://example.com/nope2');
+	await expect(page.getByRole('alert')).toHaveCount(0);
+});
