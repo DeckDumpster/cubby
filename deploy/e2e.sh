@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The whole-product walk in a real browser (web/e2e-full/walk.spec.js): the cubby-server binary
-# serving the built web app, Access stubbed by a local JWKS, YouTube by a fake Data API. Part of the
+# serving the built web app, Pocket ID stubbed by a local OIDC provider, YouTube by a fake Data API. Part of the
 # gate (deploy/ci.sh), and runnable alone: `testenv --suites e2e <branch> cubby`.
 set -euo pipefail
 

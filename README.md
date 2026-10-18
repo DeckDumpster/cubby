@@ -22,7 +22,7 @@ that calls a new tool must add it to that list.
 ## Deploy: creating the first family
 
 Cubby has no self-service signup: a parent can use the parent UI only once a family exists for
-their Access email (otherwise every parent route answers 403 "not a parent of any family").
+their Pocket ID email (otherwise every parent route answers 403 "not a parent of any family").
 Provision one from inside the running container (the registry and family file are created
 together; the email is matched case-insensitively):
 

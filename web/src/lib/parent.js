@@ -70,6 +70,10 @@ export async function api(method, path, body) {
 		headers: body === undefined ? {} : { 'content-type': 'application/json' },
 		body: body === undefined ? undefined : JSON.stringify(body)
 	});
+	// An expired session: sign in again and come back to this page.
+	if (res.status === 401 && typeof location !== 'undefined' && location.pathname.startsWith('/parent')) {
+		location.assign(`/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+	}
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
 	return data;
