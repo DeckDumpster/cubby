@@ -112,7 +112,7 @@ test.describe('hermetic stack', () => {
 		await test.step('search finds the allowed video and not the other', async () => {
 			await child.getByLabel('search').fill('volcano');
 			await child.getByRole('button', { name: 'Search' }).click();
-			await expect(child.getByRole('heading', { name: 'Search results' })).toBeVisible();
+			await expect(child.getByRole('heading', { name: 'Videos about volcano' })).toBeVisible();
 			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title })).toBeVisible();
 			await child.getByLabel('search').fill('slime');
 			await child.getByRole('button', { name: 'Search' }).click();
