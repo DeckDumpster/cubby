@@ -21,6 +21,9 @@ install -m 0644 "$root/deploy/cubby-worker.service" "$root/deploy/cubby-worker.t
 
 # The server's env file is optional in content but must exist: Quadlet rejects a "-" prefix.
 [ -e "$cfg_dir/server.env" ] || install -m 0600 /dev/null "$cfg_dir/server.env"
+# The worker's keys (CUBBY_YT_API_KEY, CUBBY_OTLP_ENDPOINT) are all optional, but podman --env-file
+# exits 125 on a missing file, so the timer would fail every firing. Create it empty.
+[ -e "$cfg_dir/worker.env" ] || install -m 0600 /dev/null "$cfg_dir/worker.env"
 
 # Restart a unit; on failure print podman's own error (not a pointer to journalctl) and exit non-zero.
 restart() {

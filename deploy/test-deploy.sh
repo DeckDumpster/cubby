@@ -49,4 +49,13 @@ cmp "$t.sum1" "$t.sum2" || fail "deploy not idempotent"
 [ -f "$t/containers/systemd/cubby-cloudflared.container" ] || fail "cloudflared unit not installed"
 rm -f "$t.sum1" "$t.sum2"
 [ -f "$t/cubby/server.env" ] || fail "server.env not created"
+[ -f "$t/cubby/worker.env" ] || fail "worker.env not created"
+
+# --- Every env file a unit names must be created by deploy, or deploy must skip the unit without it.
+for f in *.container *.service; do
+    for name in $(grep -hoE '(EnvironmentFile=|--env-file=)[^ ]*' "$f" | sed 's|.*/||'); do
+        [ -f "$t/cubby/$name" ] && continue
+        grep -q "\[ -f \"\$cfg_dir/$name\" \]" deploy.sh || fail "$f names $name: deploy neither creates nor guards it"
+    done
+done
 echo "deploy artefacts ok"
