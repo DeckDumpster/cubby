@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import {
 		api,
 		badge,
@@ -33,6 +35,7 @@
 	let expanded = $state<Record<string, boolean>>({});
 	let query = $state('');
 	let results = $state<Tile[] | null>(null);
+	let searched = $state('');
 	let error = $state('');
 
 	// The watch page: idle | loading | playing | ended | refused | stopped
@@ -75,7 +78,10 @@
 
 	onMount(() => {
 		paired = !!token.get();
-		if (paired) loadHome();
+		if (paired) {
+			loadHome();
+			if (urlQuery) runSearch(urlQuery);
+		}
 		const leave = () => leaveWatch();
 		addEventListener('pagehide', leave);
 		return () => {
@@ -92,20 +98,49 @@
 			token.set(data.token);
 			paired = true;
 			await loadHome();
+			if (urlQuery) runSearch(urlQuery);
 		} else {
 			pairError = 'That code did not work. Ask a grown-up for a new one.';
 		}
 	}
 
-	async function search(e: Event) {
-		e.preventDefault();
-		const q = query.trim();
+	// The URL is the search state: /watch is home, /watch?q=... is a search, so back leaves it.
+	const urlQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
+	let searchSeq = 0;
+
+	async function runSearch(q: string) {
+		const seq = ++searchSeq;
+		query = q;
 		if (!q) {
 			results = null;
+			searched = '';
 			return;
 		}
 		const { status, data } = await guarded(api(`/api/child/search?q=${encodeURIComponent(q)}`));
+		if (seq !== searchSeq) return;
+		searched = q;
 		results = status === 200 ? parseSearch(data) : [];
+	}
+
+	$effect(() => {
+		const q = urlQuery;
+		if (untrack(() => paired)) runSearch(q);
+	});
+
+	function search(e: Event) {
+		e.preventDefault();
+		const q = query.trim();
+		if (q === urlQuery) return;
+		goto(q ? `/watch?q=${encodeURIComponent(q)}` : '/watch', { keepFocus: true, noScroll: true });
+	}
+
+	function home() {
+		query = '';
+		if (urlQuery) goto('/watch', { noScroll: true });
+	}
+
+	function onSearchInput() {
+		if (!query.trim() && urlQuery) home();
 	}
 
 	function destroyPlayer() {
@@ -269,12 +304,20 @@
 
 		{#if view === 'grid'}
 			<form class="search" role="search" onsubmit={search}>
-				<input type="search" aria-label="search" placeholder="Search" bind:value={query} />
+				<span class="box">
+					<input type="search" aria-label="search" placeholder="Search" bind:value={query} oninput={onSearchInput} />
+					{#if query}<button type="button" class="clear" aria-label="Clear search" onclick={home}>✕</button>{/if}
+				</span>
 				<button type="submit">Search</button>
 			</form>
-			{#if results}
+			{#if urlQuery}
+				<div class="searched">
+					<button type="button" class="home" onclick={home}>← Home</button>
+					<h2>Videos about {urlQuery}</h2>
+				</div>
+			{/if}
+			{#if results && searched === urlQuery}
 				<section>
-					<h2>Search results</h2>
 					{#if results.length === 0}<p>Nothing found.</p>{/if}
 					<div class="grid">{#each results as t (t.youtube_id)}{@render tile(t)}{/each}</div>
 				</section>
@@ -347,6 +390,10 @@
 	.fill { display: block; height: 100%; background: #2a9d4b; }
 	button { font-size: 1.25rem; padding: 0.75rem 1.25rem; border-radius: 0.75rem; border: 2px solid #345; background: #fff; }
 	.search { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+	.box { flex: 1; position: relative; display: flex; }
+	.clear { position: absolute; right: 0.25rem; top: 50%; transform: translateY(-50%); border: none; background: none; padding: 0.5rem 0.75rem; }
+	.searched { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; }
+	.searched h2 { margin: 0; }
 	.search input { flex: 1; font-size: 1.5rem; padding: 0.75rem; }
 	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem; }
 	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; }
