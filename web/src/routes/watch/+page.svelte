@@ -364,7 +364,7 @@
 	}
 </script>
 
-<svelte:head><title>Cubby</title></svelte:head>
+<svelte:head><title>{view === 'playing' && current ? `${current.title} · Cubby` : 'Cubby'}</title></svelte:head>
 
 {#snippet tile(t: Tile)}
 	<button class="tile" onclick={() => open(t)}>

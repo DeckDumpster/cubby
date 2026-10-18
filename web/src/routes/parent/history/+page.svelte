@@ -7,6 +7,8 @@
 	const groups = $derived(dayGroups(ps.history, tz, Date.now() / 1000));
 </script>
 
+<svelte:head><title>History · Cubby</title></svelte:head>
+
 <section class="panel">
 	<h2>History</h2>
 	<select value={ps.historyChild} onchange={(e) => goto(`?child=${encodeURIComponent(e.currentTarget.value)}`, { replaceState: true, keepFocus: true })}>
