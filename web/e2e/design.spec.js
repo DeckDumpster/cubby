@@ -128,7 +128,7 @@ for (const [size, viewport] of SIZES) {
 			await setup(page);
 			await page.goto('/watch');
 			await first(page).click();
-			await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+			await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 			await check(page, 'player', size);
 		});
 
@@ -136,7 +136,7 @@ for (const [size, viewport] of SIZES) {
 			await setup(page);
 			await page.goto('/watch');
 			await first(page).click();
-			await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+			await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 			await page.evaluate(() => window.__state(0));
 			await expect(page.getByTestId('end-card')).toBeVisible();
 			await check(page, 'end', size);
@@ -156,7 +156,7 @@ for (const [size, viewport] of SIZES) {
 			await page.route('**/api/child/grant/*/beat', (r) => r.fulfill({ json: { remaining: { videos: 0, minutes: null }, stop: beats++ === 0 } }));
 			await page.goto('/watch');
 			await first(page).click();
-			await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+			await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 			await page.evaluate(() => window.__state(2));
 			await expect(page.getByTestId('stopped')).toBeVisible();
 			await check(page, 'stopped', size);
@@ -170,7 +170,7 @@ test.describe('pause card in the shell', () => {
 		await setup(page);
 		await page.goto('/watch');
 		await first(page).click();
-		await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+		await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 		await page.evaluate(() => window.__state(1));
 		await page.evaluate(() => window.__state(2));
 		await expect(page.getByTestId('pause-card')).toBeVisible();

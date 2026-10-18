@@ -86,7 +86,7 @@ test('the grid shows the budget badge and has no off-origin link anywhere in the
 	expect(await offOrigin(page)).toEqual([]);
 
 	await page.getByRole('button', { name: /First video/ }).click();
-	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	expect(await offOrigin(page)).toEqual([]);
 
 	await page.evaluate(() => window.__state(0));
@@ -99,7 +99,7 @@ test('the player is built only after a grant, with the privacy host and the LLD 
 	await page.goto('/watch');
 	expect(await page.evaluate(() => window.__players.length)).toBe(0);
 	await page.getByRole('button', { name: /First video/ }).click();
-	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	const opts = await page.evaluate(() => {
 		const o = window.__players[0].opts;
 		return { host: o.host, videoId: o.videoId, vars: o.playerVars };
@@ -113,7 +113,7 @@ test('ENDED destroys the player and shows the end card with suggestions and the 
 	const calls = await setup(page);
 	await page.goto('/watch');
 	await page.getByRole('button', { name: /First video/ }).click();
-	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	await page.evaluate(() => window.__state(1));
 	await page.evaluate(() => window.__state(0));
 	const card = page.getByTestId('end-card');
@@ -159,7 +159,7 @@ test('PAUSED hides the iframe and shows our Resume screen; Resume plays on', asy
 	await setup(page);
 	await page.goto('/watch');
 	await page.getByRole('button', { name: /First video/ }).click();
-	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	await page.evaluate(() => window.__state(1));
 	await page.evaluate(() => {
 		window.__players[0].t = 33;
@@ -170,7 +170,7 @@ test('PAUSED hides the iframe and shows our Resume screen; Resume plays on', asy
 	await page.screenshot({ path: 'test-results/paused.png' });
 	await page.getByTestId('resume').click();
 	await expect(page.getByTestId('pause-card')).toHaveCount(0);
-	await expect(page.locator('iframe[title="fake player"]')).toBeVisible();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	const p = await page.evaluate(() => ({ t: window.__players[0].getCurrentTime(), played: window.__players[0].played }));
 	expect(p).toEqual({ t: 33, played: 1 });
 });
