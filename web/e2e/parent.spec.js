@@ -48,7 +48,7 @@ test('a failed add keeps the typed link and shows the error beside it', async ({
 	await page.goto('/parent');
 	const input = page.getByPlaceholder('Paste a YouTube link');
 	await input.fill('https://example.com/nope');
-	await page.getByRole('button', { name: 'Add' }).click();
+	await page.getByRole('button', { name: 'Add', exact: true }).click();
 	await expect(page.getByRole('alert')).toContainText(MSG);
 	await expect(input).toHaveValue('https://example.com/nope');
 	await input.fill('https://example.com/nope2');
@@ -71,7 +71,7 @@ test('one press of Add (or Enter) saves the link and it survives a reload', asyn
 	await page.goto('/parent');
 	const input = page.getByPlaceholder('Paste a YouTube link');
 	await input.fill('https://youtu.be/dQw4w9WgXcQ');
-	await page.getByRole('button', { name: 'Add' }).click();
+	await page.getByRole('button', { name: 'Add', exact: true }).click();
 	await expect(page.getByText('dQw4w9WgXcQ')).toBeVisible();
 	await expect(page.getByText('pending')).toBeVisible();
 	await expect(input).toHaveValue('');
