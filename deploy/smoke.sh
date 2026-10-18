@@ -5,6 +5,8 @@
 # does. The step that needs a credential is skipped, with the reason printed, when it is absent:
 # put SMOKE_DEVICE_TOKEN (a paired device's token) in <config dir>/cubby/smoke.env.
 #
+# The expected OIDC redirect host is CUBBY_OIDC_BASE_URL from <config dir>/cubby/server.env.
+#
 # Env: CUBBY_SMOKE_URL (default http://127.0.0.1:8790), CUBBY_SMOKE_WAIT_S (how long to wait for
 # /healthz, default 60).
 set -euo pipefail
@@ -29,6 +31,9 @@ trap 'rm -f "$env_file"' EXIT
 chmod 600 "$env_file"
 echo "SMOKE_BASE_URL=$url" >"$env_file"
 [ -f "$cfg_dir/smoke.env" ] && cat "$cfg_dir/smoke.env" >>"$env_file"
+# The redirect_uri the server hands the provider is its configured public address, not the probe address.
+public_base="$(sed -n 's/^CUBBY_OIDC_BASE_URL=//p' "$cfg_dir/server.env" 2>/dev/null | tail -n1)"
+[ -z "$public_base" ] || echo "SMOKE_PUBLIC_BASE_URL=$public_base" >>"$env_file"
 
 echo "==> smoke: walking $url with $image"
 podman run --rm --network=host --env-file "$env_file" -v "$root/web:/web:Z" -w /web "$image" \
