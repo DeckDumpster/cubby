@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use cubby_db::Registry;
-use cubby_server::{Config, app};
+use cubby_server::Config;
 use http_body_util::BodyExt;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use rusqlite::Connection;
