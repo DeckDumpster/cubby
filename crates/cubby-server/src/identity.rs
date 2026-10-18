@@ -1,4 +1,4 @@
-//! Identity routes and the two guards: the Access JWT for `/api/parent/*`, the device bearer
+//! Identity routes and the two guards: the OIDC session cookie for `/api/parent/*`, the device bearer
 //! token for `/api/child/*` (except `/api/child/pair`, which is how a device gets one).
 
 use std::net::SocketAddr;
@@ -18,7 +18,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::AppState;
-use crate::access::{extract_token, missing_token};
 use crate::error::ApiError;
 
 type Result<T> = std::result::Result<T, ApiError>;
@@ -36,6 +35,7 @@ pub(crate) fn routes(state: Arc<AppState>) -> Router {
         .route_layer(middleware::from_fn_with_state(state.clone(), device_guard));
     Router::new()
         .route("/api/child/pair", post(pair))
+        .merge(crate::oidc::routes())
         .merge(parent)
         .merge(child)
         .with_state(state)
@@ -67,34 +67,29 @@ impl AppState {
     }
 }
 
-/// Verifies the Access JWT and that its email is one of the family's parents. Fails closed: with
-/// no Access configuration every parent route is a 401.
+/// Requires a live OIDC session and that its email is one of the family's parents. Fails closed:
+/// with no OIDC configuration every parent route is a 401.
 async fn parent_guard(
     State(state): State<Arc<AppState>>,
     req: Request,
     next: Next,
 ) -> Result<Response> {
-    let Some(access) = state.access.as_ref() else {
+    let Some(oidc) = state.oidc.as_ref() else {
         state.count("cubby_parent_auth", "unconfigured");
-        return Err(ApiError::unauthorized(
-            "Cloudflare Access is not configured",
-        ));
+        return Err(ApiError::unauthorized("OIDC sign-in is not configured"));
+    };
+    let Some(token) = crate::oidc::session_token(req.headers()) else {
+        state.count("cubby_parent_auth", "missing");
+        return Err(ApiError::unauthorized("sign in required"));
+    };
+    let Some(email) = oidc.session_email(&token) else {
+        state.count("cubby_parent_auth", "invalid");
+        return Err(ApiError::unauthorized("session expired; sign in again"));
     };
     let (parts, body) = req.into_parts();
-    let Some(token) = extract_token(&parts) else {
-        state.count("cubby_parent_auth", "missing");
-        return Err(missing_token());
-    };
-    let identity = match access.verify(&token).await {
-        Ok(i) => i,
-        Err(e) => {
-            state.count("cubby_parent_auth", "invalid");
-            return Err(e);
-        }
-    };
     let family = {
         let registry = state.registry.lock().map_err(ApiError::internal)?;
-        db(registry.lookup(identity.email()))?
+        db(registry.lookup(&email))?
     };
     let Some(family) = family else {
         state.count("cubby_parent_auth", "not_a_parent");
@@ -106,7 +101,7 @@ async fn parent_guard(
     state.count("cubby_parent_auth", "ok");
     let mut req = Request::from_parts(parts, body);
     if let Some(actor) = req.extensions().get::<crate::Actor>() {
-        actor.set(format!("parent:{}", identity.email()));
+        actor.set(format!("parent:{email}"));
     }
     req.extensions_mut().insert(ParentOf(family.id));
     Ok(next.run(req).await)

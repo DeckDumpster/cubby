@@ -1,8 +1,9 @@
 // The stack the end-to-end walk runs against: the real cubby-server binary serving the built web
-// app, with Cloudflare Access stood in for by a local JWKS and YouTube by a local fake Data API.
+// app, with Pocket ID stood in for by a local OIDC provider and YouTube by a local fake Data API.
 import { spawn } from 'node:child_process';
 import { generateKeyPairSync, createSign } from 'node:crypto';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -27,18 +28,56 @@ function listen(server, port) {
 	});
 }
 
-/** A signer and the JWKS document that verifies it. */
-export function accessKeys(kid = 'e2e-key') {
+export const CLIENT_ID = 'e2e-client';
+export const CLIENT_SECRET = 'e2e-secret';
+
+/**
+ * A stand-in for Pocket ID: discovery, an /authorize that approves at once as `email` in the
+ * required group (a browser sees only redirects), a /token that checks the client secret and PKCE,
+ * and the JWKS for the RS256 ID tokens it signs.
+ */
+function fakeOidc(email, kid = 'e2e-key') {
 	const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 	const jwk = { ...publicKey.export({ format: 'jwk' }), kid, alg: 'RS256', use: 'sig' };
-	const sign = ({ iss, aud, email }) => {
-		const now = Math.floor(Date.now() / 1000);
-		const head = b64u(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid }));
-		const body = b64u(JSON.stringify({ iss, aud, email, iat: now, nbf: now - 60, exp: now + 3600 }));
-		const sig = createSign('RSA-SHA256').update(`${head}.${body}`).sign(privateKey);
-		return `${head}.${body}.${b64u(sig)}`;
-	};
-	return { jwks: { keys: [jwk] }, sign };
+	const codes = new Map();
+	let n = 0;
+	const server = createServer(async (req, res) => {
+		const u = new URL(req.url, 'http://x');
+		const issuer = `http://127.0.0.1:${server.address().port}`;
+		const json = (o, status = 200) => (res.writeHead(status, { 'content-type': 'application/json' }), res.end(JSON.stringify(o)));
+		if (u.pathname === '/.well-known/openid-configuration') {
+			return json({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, jwks_uri: `${issuer}/jwks` });
+		}
+		if (u.pathname === '/jwks') return json({ keys: [jwk] });
+		if (u.pathname === '/authorize') {
+			const q = u.searchParams;
+			const code = `code-${++n}`;
+			codes.set(code, { nonce: q.get('nonce'), challenge: q.get('code_challenge') });
+			const back = new URL(q.get('redirect_uri'));
+			back.searchParams.set('code', code);
+			back.searchParams.set('state', q.get('state'));
+			res.writeHead(302, { location: back.toString() });
+			return res.end();
+		}
+		if (u.pathname === '/token' && req.method === 'POST') {
+			let body = '';
+			for await (const c of req) body += c;
+			const f = new URLSearchParams(body);
+			const issued = codes.get(f.get('code'));
+			codes.delete(f.get('code'));
+			const challenge = createHash('sha256').update(f.get('code_verifier') ?? '').digest('base64url');
+			if (f.get('client_id') !== CLIENT_ID || f.get('client_secret') !== CLIENT_SECRET || !issued || issued.challenge !== challenge) {
+				return json({ error: 'invalid_grant' }, 400);
+			}
+			const now = Math.floor(Date.now() / 1000);
+			const head = b64u(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid }));
+			const claims = b64u(JSON.stringify({ iss: issuer, aud: CLIENT_ID, sub: 'e2e', email, groups: ['cubby-parents'], nonce: issued.nonce, iat: now, exp: now + 300 }));
+			const sig = createSign('RSA-SHA256').update(`${head}.${claims}`).sign(privateKey);
+			return json({ id_token: `${head}.${claims}.${b64u(sig)}`, access_token: 'x', token_type: 'Bearer' });
+		}
+		res.writeHead(404).end();
+	});
+	return server;
 }
 
 function fakeYouTube() {
@@ -80,14 +119,11 @@ export async function startStack({ ports = {} } = {}) {
 	if (!existsSync(join(web, 'index.html'))) throw new Error(`no built web app at ${web}; run npm run build`);
 	if (!existsSync(bin)) throw new Error(`no server binary at ${bin}; run cargo build -p cubby-server (or set CUBBY_SERVER_BIN)`);
 
-	const keys = accessKeys();
-	const jwks = createServer((_, res) => (res.setHeader('content-type', 'application/json'), res.end(JSON.stringify(keys.jwks))));
+	const oidc = fakeOidc(PARENT_EMAIL);
 	const yt = fakeYouTube();
-	const jwksPort = await listen(jwks, ports.jwks ?? 0);
+	const oidcPort = await listen(oidc, ports.oidc ?? 0);
 	const ytPort = await listen(yt.server, ports.yt ?? 0);
 
-	const team = 'https://e2e.cloudflareaccess.test';
-	const aud = 'e2e-aud';
 	const port = ports.server ?? 4180;
 	const dataDir = mkdtempSync(join(tmpdir(), 'cubby-e2e-'));
 	const child = spawn(bin, [], {
@@ -97,9 +133,10 @@ export async function startStack({ ports = {} } = {}) {
 			CUBBY_PORT: String(port),
 			CUBBY_WEB_DIR: web,
 			CUBBY_DATA_DIR: dataDir,
-			CUBBY_ACCESS_TEAM_DOMAIN: team,
-			CUBBY_ACCESS_AUD: aud,
-			CUBBY_ACCESS_JWKS_URL: `http://127.0.0.1:${jwksPort}/`,
+			CUBBY_OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+			CUBBY_OIDC_CLIENT_ID: CLIENT_ID,
+			CUBBY_OIDC_CLIENT_SECRET: CLIENT_SECRET,
+			CUBBY_OIDC_BASE_URL: `http://127.0.0.1:${port}`,
 			CUBBY_BOOTSTRAP_PARENT: PARENT_EMAIL,
 			CUBBY_YT_API_KEY: 'fake-key',
 			CUBBY_YT_BASE_URL: `http://127.0.0.1:${ytPort}/youtube/v3`
@@ -121,8 +158,8 @@ export async function startStack({ ports = {} } = {}) {
 	}
 	const stop = async () => {
 		child.kill('SIGINT');
-		jwks.close();
+		oidc.close();
 		yt.server.close();
 	};
-	return { baseURL, parentJwt: () => keys.sign({ iss: team, aud, email: PARENT_EMAIL }), ytCalls: yt.calls, stop };
+	return { baseURL, ytCalls: yt.calls, stop };
 }

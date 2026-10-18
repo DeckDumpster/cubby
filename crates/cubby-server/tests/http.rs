@@ -111,7 +111,7 @@ async fn a_request_logs_one_line_with_route_and_status_and_no_secret() {
         .oneshot(
             Request::post("/api/parent/devices/dev-123/revoke")
                 .header("authorization", "Bearer SECRET-TOKEN-abc")
-                .header("cf-access-jwt-assertion", "SECRET-JWT-xyz")
+                .header("cookie", "cubby_session=SECRET-JWT-xyz")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -127,10 +127,7 @@ async fn a_request_logs_one_line_with_route_and_status_and_no_secret() {
     );
     assert!(line.contains(r#""status":401"#), "{line}");
     assert!(line.contains(r#""method":"POST""#), "{line}");
-    assert!(
-        line.contains("Cloudflare Access is not configured"),
-        "{line}"
-    );
+    assert!(line.contains("OIDC sign-in is not configured"), "{line}");
     for secret in ["SECRET", "dev-123"] {
         assert!(!line.contains(secret), "{secret} leaked: {line}");
     }

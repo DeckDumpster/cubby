@@ -33,7 +33,7 @@
 <div class="parent">
 <header class="bar">
 	<h1><span class="logo" aria-hidden="true">C</span> Cubby <small>parent</small></h1>
-	<a class="signout" href="/cdn-cgi/access/logout">Sign out</a>
+	<a class="signout" href="/auth/logout" data-sveltekit-reload>Sign out</a>
 </header>
 <nav class="tabs" aria-label="Sections">
 	{#each sections as [key, label] (key)}

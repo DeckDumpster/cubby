@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # The user-path walk (web/e2e-full/walk.spec.js) against the deployed instance, in the Playwright
-# image: /parent loads styled and accepts the test identity, the child routes are mounted, and a
-# paired device sees its catalogue. deploy.sh runs it last and reports the deploy failed if it
-# does. The steps that need credentials are skipped, with the reason printed, when they are absent:
-# put SMOKE_ACCESS_JWT (a test Access identity that is a parent of a family) and
-# SMOKE_DEVICE_TOKEN (a paired device's token) in <config dir>/cubby/smoke.env.
+# image: /parent sends a signed-out browser to sign in at the provider, the child routes are mounted, and
+# a paired device sees its catalogue. deploy.sh runs it last and reports the deploy failed if it
+# does. The step that needs a credential is skipped, with the reason printed, when it is absent:
+# put SMOKE_DEVICE_TOKEN (a paired device's token) in <config dir>/cubby/smoke.env.
 #
 # Env: CUBBY_SMOKE_URL (default http://127.0.0.1:8790), CUBBY_SMOKE_WAIT_S (how long to wait for
 # /healthz, default 60).
