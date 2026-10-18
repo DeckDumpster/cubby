@@ -192,6 +192,39 @@ test('a granted player shows no YouTube chrome and Cubby controls drive it', asy
 	expect(o.controls).toBe(0);
 });
 
+test('the iframe stays visibility:hidden behind a ready frame after start and seek until PLAYING has lasted N s', async ({ page }) => {
+	await page.setViewportSize({ width: 1024, height: 768 });
+	await page.clock.install();
+	await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	const frame = page.locator('iframe[title="fake player"]');
+	const hidden = () => frame.evaluate((e) => getComputedStyle(e).visibility);
+	await page.evaluate(() => window.__state(1));
+	expect(await hidden()).toBe('hidden');
+	await expect(page.getByTestId('ready-frame')).toBeVisible();
+	await page.screenshot({ path: 'test-results/ready-after-start.png' });
+	await page.clock.runFor(3500);
+	expect(await hidden()).toBe('hidden');
+	await page.clock.runFor(1000);
+	expect(await hidden()).toBe('visible');
+	await expect(page.getByTestId('ready-frame')).toHaveCount(0);
+	await page.screenshot({ path: 'test-results/revealed.png' });
+	await page.locator('input[aria-label="seek"]').fill('60');
+	expect(await hidden()).toBe('hidden');
+	await expect(page.getByTestId('ready-frame')).toBeVisible();
+	await expect(page.getByTestId('playpause')).toBeEnabled();
+	await page.screenshot({ path: 'test-results/ready-after-seek.png' });
+	await page.clock.runFor(4100);
+	expect(await hidden()).toBe('visible');
+	await page.evaluate(() => window.__state(2));
+	await page.getByTestId('resume').click();
+	expect(await hidden()).toBe('hidden');
+	await page.evaluate(() => window.__state(1));
+	await page.clock.runFor(4100);
+	expect(await hidden()).toBe('visible');
+});
+
 test('an embed that navigates off the granted id is destroyed and the grant ends off-list', async ({ page }) => {
 	const calls = await setup(page);
 	await page.goto('/watch');

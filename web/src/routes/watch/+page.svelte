@@ -6,6 +6,8 @@
 		api,
 		badge,
 		BEAT_MS,
+		SETTLE_MS,
+		SEEK_JUMP_S,
 		clock,
 	endReason,
 		loadYT,
@@ -44,6 +46,10 @@
 	let refusal = $state('');
 	let paused = $state(false);
 	let playing = $state(false);
+	// False from every start, resume and seek until PLAYING has lasted SETTLE_MS: the iframe stays visibility:hidden meanwhile.
+	let settled = $state(false);
+	let settleTimer: ReturnType<typeof setTimeout> | undefined;
+	let lastPos = 0;
 	let pos = $state(0);
 	let dur = $state(0);
 	let poll: ReturnType<typeof setInterval> | undefined;
@@ -161,6 +167,10 @@
 		timer = undefined;
 		clearInterval(poll);
 		poll = undefined;
+		clearTimeout(settleTimer);
+		settleTimer = undefined;
+		settled = false;
+		lastPos = 0;
 		try {
 			player?.destroy();
 		} catch {
@@ -194,9 +204,27 @@
 		if (id) await api(`/api/child/grant/${id}/end`, { body: { reason: endReason(reason) } });
 	}
 
+	function unsettle() {
+		settled = false;
+		clearTimeout(settleTimer);
+		settleTimer = undefined;
+		if (playing) armSettle();
+	}
+
+	function armSettle() {
+		if (settled || settleTimer) return;
+		settleTimer = setTimeout(() => {
+			settleTimer = undefined;
+			settled = true;
+		}, SETTLE_MS);
+	}
+
 	function tickClock() {
 		try {
-			pos = player.getCurrentTime() ?? pos;
+			const t = player.getCurrentTime() ?? pos;
+			if (Math.abs(t - lastPos) > SEEK_JUMP_S) unsettle();
+			lastPos = t;
+			pos = t;
 			dur = player.getDuration?.() || dur;
 		} catch {
 			/* not ready */
@@ -212,11 +240,14 @@
 	function seek(e: Event) {
 		const v = Number((e.target as HTMLInputElement).value);
 		pos = v;
+		lastPos = v;
+		unsettle();
 		player?.seekTo?.(v, true);
 	}
 
 	async function resume() {
 		paused = false;
+		unsettle();
 		await tick();
 		player?.playVideo?.();
 	}
@@ -298,12 +329,16 @@
 		if (s === S.PLAYING) {
 			paused = false;
 			playing = true;
+			armSettle();
 			clearInterval(poll);
 			poll = setInterval(tickClock, 500);
 			lastBeat = Date.now();
 			clearInterval(timer);
 			timer = setInterval(() => beat('playing'), BEAT_MS);
 		} else if (s === S.PAUSED) {
+			clearTimeout(settleTimer);
+			settleTimer = undefined;
+			settled = false;
 			clearInterval(timer);
 			timer = undefined;
 			playing = false;
@@ -313,6 +348,11 @@
 		} else if (s === S.ENDED) {
 			playing = false;
 			finish('ended', 'ended');
+		} else {
+			// buffering, cued, unstarted: the chrome may be up, restart the count
+			clearTimeout(settleTimer);
+			settleTimer = undefined;
+			settled = false;
 		}
 	}
 
@@ -430,7 +470,10 @@
 		{:else if view === 'playing' && current}
 			<h1 class="now">{current.title}</h1>
 			<div class="stage">
-				<div class="player" class:hidden={paused} bind:this={host}></div>
+				<div class="player" class:hidden={paused} class:unsettled={!settled} data-settled={settled} bind:this={host}></div>
+				{#if !settled && !paused}
+					<div class="ready" data-testid="ready-frame"><h2 class="break">Getting your video ready…</h2></div>
+				{/if}
 				{#if paused}
 					<div class="pause" data-testid="pause-card">
 						<h2 class="break">Taking a break?</h2>
@@ -502,6 +545,8 @@
 
 	.stage { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; }
 	.player, .player :global(iframe) { width: 100%; height: 100%; border: 0; }
+	.player.unsettled { visibility: hidden; }
+	.ready { position: absolute; inset: 0; background: var(--surface); display: flex; align-items: center; justify-content: center; }
 	.pause { position: absolute; inset: 0; background: var(--surface); display: flex; flex-direction: column; gap: var(--space-4); align-items: center; justify-content: center; }
 	.break { margin: 0; font-size: 2rem; }
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }

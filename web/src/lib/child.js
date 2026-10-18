@@ -3,6 +3,10 @@
 export const PLAYER_HOST = 'https://www.youtube-nocookie.com';
 export const PLAYER_VARS = { autoplay: 0, rel: 0, playsinline: 1, fs: 0, iv_load_policy: 3, controls: 0, disablekb: 1 };
 export const BEAT_MS = 10_000;
+/** The embed shows its own chrome after every start and seek; keep it hidden until PLAYING has lasted this long. Tune on an iPad. */
+export const SETTLE_MS = 4000;
+/** A playback position jump larger than this (seconds) between clock ticks is a seek we did not make. */
+export const SEEK_JUMP_S = 2;
 const TOKEN_KEY = 'cubby_token';
 
 /** @param {string | undefined} ua */
