@@ -19,6 +19,11 @@ grep -q 'Volume=cubby-data:/data' cubby-litestream.container || fail "litestream
 if ./restore-drill.sh >/dev/null 2>&1; then fail "restore-drill ran with no arguments"; fi
 h="$(./restore-drill.sh --help)"; case "$h" in *family-*) ;; *) fail "restore-drill help";; esac; : || fail "restore-drill help"
 
+# --- Tunnel connector: host network to reach loopback, token from an env file, never inline.
+grep -q '^Network=host' cubby-cloudflared.container || fail "cloudflared must use host network"
+grep -q '^EnvironmentFile=.*cloudflared.env' cubby-cloudflared.container || fail "cloudflared env file"
+if grep -qi 'TUNNEL_TOKEN=.\+\|--token' cubby-cloudflared.container; then fail "token inline in unit"; fi
+
 # --- Deploy is idempotent: running the install step twice leaves identical files.
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
 for i in 1 2; do CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$t" ./deploy.sh >/dev/null; done
@@ -27,5 +32,6 @@ CUBBY_DEPLOY_DRY_RUN=1 XDG_CONFIG_HOME="$t" ./deploy.sh >/dev/null
 ( cd "$t" && find . -type f | sort | xargs sha256sum ) > "$t.sum2"
 cmp "$t.sum1" "$t.sum2" || fail "deploy not idempotent"
 [ -f "$t/containers/systemd/cubby-litestream.container" ] || fail "litestream unit not installed"
+[ -f "$t/containers/systemd/cubby-cloudflared.container" ] || fail "cloudflared unit not installed"
 rm -f "$t.sum1" "$t.sum2"
 echo "deploy artefacts ok"

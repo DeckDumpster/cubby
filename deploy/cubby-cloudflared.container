@@ -1,0 +1,18 @@
+[Unit]
+Description=Cubby Cloudflare tunnel connector
+After=cubby-server.service
+
+[Container]
+Image=docker.io/cloudflare/cloudflared:2025.9.1
+# TUNNEL_TOKEN, written by deploy/tunnel-env.sh; never committed.
+EnvironmentFile=%h/.config/cubby/cloudflared.env
+# Host network so the tunnel's ingress http://127.0.0.1:8790 reaches the loopback-only server.
+Network=host
+Exec=tunnel --no-autoupdate run
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
