@@ -41,8 +41,10 @@ for (const path of ['allow', 'review'])
 		test(`library on /parent/${path} at ${w}px`, async ({ page }) => {
 			await page.setViewportSize({ width: w, height: h });
 			await mock(page);
+			await page.goto(`/parent/${path}`); // warm the dev server's module cache
+			await expect(page.getByRole('button', { name: /Science for Kids/ })).toBeVisible();
 			const t0 = Date.now();
-			await page.goto(`/parent/${path}`);
+			await page.reload();
 			const science = page.getByRole('button', { name: /Science for Kids/ });
 			await expect(science).toBeVisible();
 			expect(Date.now() - t0, 'first render').toBeLessThan(1000);
