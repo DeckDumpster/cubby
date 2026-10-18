@@ -5,9 +5,9 @@ const HOME = {
 	child: { name: 'Kid' },
 	remaining: { videos: 3, minutes: null },
 	total_videos: 5,
-	sections: [{ key: 'all', title: 'All videos', items: [tile('v1', 'First video'), tile('v2', 'Second video')] }]
+	sections: [{ key: 'all', title: 'All videos', tiles: [tile('v1', 'First video'), tile('v2', 'Second video')] }]
 };
-const NEXT = { items: [tile('v2', 'Second video'), tile('v3', 'Third video')], remaining: { videos: 2, minutes: null } };
+const NEXT = { tiles: [tile('v2', 'Second video'), tile('v3', 'Third video')], remaining: { videos: 2, minutes: null } };
 
 /** A stand-in for the YouTube IFrame API; the test drives its state by hand. */
 const FAKE_PLAYER = () => {
@@ -48,7 +48,7 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		if (path.endsWith('/beat')) return json({ remaining: { videos: 2, minutes: null }, stop: false });
 		if (path.endsWith('/end')) return json({ ok: true });
 		if (path.endsWith('/next')) return json(NEXT);
-		if (path.endsWith('/search')) return json({ items: [tile('v9', 'Found it')] });
+		if (path.endsWith('/search')) return json({ tiles: [tile('v9', 'Found it')] });
 		if (path.endsWith('/request')) return json({ ok: true });
 		return route.fulfill({ status: 404, json: {} });
 	});
@@ -161,5 +161,50 @@ test.describe('inside the iPad shell', () => {
 		await expect(page.getByTestId('pause-card')).toBeVisible();
 		await page.getByRole('button', { name: 'Keep watching' }).click();
 		await expect(page.getByTestId('pause-card')).toHaveCount(0);
+	});
+});
+
+test.describe('leaving a search', () => {
+	async function searched(page) {
+		await setup(page);
+		await page.goto('/watch');
+		await page.getByLabel('search').fill('golden');
+		await page.getByRole('button', { name: 'Search' }).click();
+		await expect(page.getByRole('button', { name: /Found it/ })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Videos about golden' })).toBeVisible();
+		await expect(page).toHaveURL(/\/watch\?q=golden/);
+	}
+	async function atHome(page) {
+		await expect(page.getByRole('button', { name: /First video/ })).toBeVisible();
+		await expect(page.getByRole('button', { name: /Found it/ })).toHaveCount(0);
+		await expect(page.getByLabel('search')).toHaveValue('');
+		await expect(page).toHaveURL(/\/watch$/);
+	}
+
+	test('the clear button returns home', async ({ page }) => {
+		await searched(page);
+		await page.getByRole('button', { name: 'Clear' }).click();
+		await atHome(page);
+	});
+	test('the Home control returns home', async ({ page }) => {
+		await searched(page);
+		await page.getByRole('button', { name: /Home/ }).click();
+		await atHome(page);
+	});
+	test('emptying the box returns home', async ({ page }) => {
+		await searched(page);
+		await page.getByLabel('search').fill('');
+		await atHome(page);
+	});
+	test('browser back returns home', async ({ page }) => {
+		await searched(page);
+		await page.goBack();
+		await atHome(page);
+	});
+	test('reloading a search url shows the results', async ({ page }) => {
+		await setup(page);
+		await page.goto('/watch?q=golden');
+		await expect(page.getByRole('button', { name: /Found it/ })).toBeVisible();
+		await expect(page.getByLabel('search')).toHaveValue('golden');
 	});
 });
