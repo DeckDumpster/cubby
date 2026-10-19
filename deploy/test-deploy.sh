@@ -5,7 +5,11 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# Access policy split and tunnel ingress are Terraform now: infra/tests/guarantees.tftest.hcl.
+# Tunnel ingress is Terraform: infra/tests/guarantees.tftest.hcl. The parent site signs in natively
+# against Pocket ID, so no Cloudflare Access application or policy may front cubby.gantt.pub.
+if grep -qE 'cloudflare_zero_trust_access_(application|policy)|cloudflare_access_' ../infra/*.tf; then
+    fail "infra declares a Cloudflare Access application or policy"
+fi
 
 # --- Litestream: directory mode over the data volume, bucket cubby-backups, top-level retention.
 grep -q 'dir: /data' litestream.yml || fail "litestream dir"

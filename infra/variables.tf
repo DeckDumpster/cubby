@@ -27,24 +27,8 @@ variable "origin" {
   default = "http://127.0.0.1:8790"
 }
 
-variable "pocket_id_login_method_id" {
-  type        = string
-  description = "Access identity provider id of the Pocket ID login method, from the identity repo's output. The parent app allows only this method."
-}
-
-variable "session_duration" {
-  type    = string
-  default = "24h"
-}
-
 variable "permissions_boundary_arn" {
   type        = string
   description = "Boundary the terraform-deploy role requires on every IAM user or role it creates."
   default     = "arn:aws:iam::189923011121:policy/terraform-deploy-boundary"
-}
-
-variable "access_team_domain" {
-  type        = string
-  default     = "https://royal-glitter-fbe6.cloudflareaccess.com"
-  description = "Full Zero Trust team URL; the expected iss of Access JWTs."
 }

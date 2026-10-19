@@ -12,8 +12,6 @@ variables {
   deploy_role_arn       = "arn:aws:iam::123456789012:role/terraform-deploy"
   cloudflare_account_id = "acct"
   cloudflare_zone_id    = "zone"
-
-  pocket_id_login_method_id = "11111111-2222-3333-4444-555555555555"
 }
 
 override_resource {
@@ -90,33 +88,9 @@ run "iam_policy_names_only_this_bucket" {
   }
 }
 
-run "access_allows_only_the_parents" {
+run "no_cloudflare_access_in_front_of_cubby" {
   command = plan
 
-  assert {
-    condition     = cloudflare_zero_trust_access_policy.parent.decision == "allow" && length(cloudflare_zero_trust_access_policy.parent.include) == 1 && length(cloudflare_zero_trust_access_policy.parent.exclude) == 0 && length(cloudflare_zero_trust_access_policy.parent.require) == 0 && cloudflare_zero_trust_access_policy.parent.include[0].oidc.claim_name == "groups" && cloudflare_zero_trust_access_policy.parent.include[0].oidc.claim_value == "cubby-parents" && cloudflare_zero_trust_access_policy.parent.include[0].oidc.identity_provider_id == var.pocket_id_login_method_id
-    error_message = "parent policy must be one allow rule: OIDC groups contains cubby-parents"
-  }
-  assert {
-    condition     = toset(cloudflare_zero_trust_access_application.parent.allowed_idps) == toset([var.pocket_id_login_method_id]) && length(cloudflare_zero_trust_access_application.parent.allowed_idps) == 1
-    error_message = "parent app allows exactly one login method, Pocket ID"
-  }
-  assert {
-    condition     = cloudflare_zero_trust_access_application.parent.auto_redirect_to_identity == true
-    error_message = "parent app must use instant auth"
-  }
-  assert {
-    condition     = cloudflare_zero_trust_access_policy.device_bypass.decision == "bypass"
-    error_message = "device bypass policy"
-  }
-  assert {
-    condition     = toset([for d in cloudflare_zero_trust_access_application.parent.destinations : d.uri]) == toset(["cubby.gantt.pub/parent", "cubby.gantt.pub/parent/*", "cubby.gantt.pub/api/parent"])
-    error_message = "parent app covers /parent, /parent/* and /api/parent"
-  }
-  assert {
-    condition     = contains([for d in cloudflare_zero_trust_access_application.public.destinations : d.uri], "cubby.gantt.pub/watch") && !contains([for d in cloudflare_zero_trust_access_application.public.destinations : d.uri], "cubby.gantt.pub")
-    error_message = "bypass app covers /watch and never the whole host"
-  }
   assert {
     condition     = cloudflare_zero_trust_tunnel_cloudflared_config.cubby.config.ingress[0].service == "http://127.0.0.1:8790" && cloudflare_zero_trust_tunnel_cloudflared_config.cubby.config.ingress[1].service == "http_status:404"
     error_message = "tunnel ingress"
