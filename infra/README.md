@@ -13,9 +13,8 @@ AWS (`backups.tf`):
   Manager as `cubby/litestream` (JSON: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
 
 Cloudflare (`cloudflare.tf`): the `cubby.gantt.pub` CNAME, the `cubby` tunnel with ingress to
-`http://127.0.0.1:8790` (404 catch-all), an Access application on `/parent` and `/api/parent`
-allowing only `ryan@gantt.pub`, and a bypass application for `/watch`, `/api/child`, `/assets`,
-`/_app` and `/healthz` (protected by the device token instead).
+`http://127.0.0.1:8790` (404 catch-all). No Cloudflare Access application fronts the host: the parent
+site signs in natively against Pocket ID and `/watch` is protected by the device token.
 
 DNS (`dns.tf`, `dns-records.json`): every other gantt.pub record, mirrored from Route 53 (the Fastmail
 MX, SPF, DKIM CNAMEs and DMARC), unproxied. Terraform manages records only; the zone is created in the
@@ -27,7 +26,7 @@ Cloudflare dashboard and its id passed as `cloudflare_zone_id`.
       && terraform validate && terraform test
 
 `deploy/ci.sh` runs this; `tests/guarantees.tftest.hcl` uses mocked providers to assert the bucket is
-private/versioned/retained, the IAM policy names only this bucket, and Access allows only the Pocket ID login method (instant auth) and one rule: OIDC claim `groups` contains `cubby-parents` (every member must also be a family parent via `cubby-server family add-parent`).
+private/versioned/retained, the IAM policy names only this bucket, and the tunnel ingress is the origin plus a 404 catch-all (`deploy/test-deploy.sh` also fails if any Access application or policy returns to `infra/*.tf`).
 
 ## Plan and apply (the Concierge, with an MFA session and a Cloudflare token)
 
@@ -40,7 +39,7 @@ private/versioned/retained, the IAM policy names only this bucket, and Access al
     terraform apply cubby.tfplan
 
 The first plan adopts the seven existing Fastmail records in `imports.tf` instead of creating them.
-Expect: `Plan: 7 to import, N to add (Cubby record, tunnel, Access), 3 to change (DKIM proxied->false), 0 to destroy`
+Expect: `Plan: 7 to import, N to add (Cubby record, tunnel), 3 to change (DKIM proxied->false), 0 to destroy`
 (the three DKIM CNAMEs go proxied true -> false; MX and TXT show no change). Anything else, stop.
 Once applied, `imports.tf` may be deleted.
 
