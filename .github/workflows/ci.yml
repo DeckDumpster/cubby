@@ -1,0 +1,30 @@
+name: CI
+
+# Runs the gate .spira/testenv.toml declares (its default suite, `ci` = deploy/ci.sh), in the
+# image declared there. Spira's queue.local publish PRs merge only once this check is green.
+# Public repo, GitHub-hosted runner, no secrets.
+
+on:
+  pull_request:
+    branches: [main, 'integration/**']
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # Keep in step with `image` in .spira/testenv.toml.
+      image: docker.io/library/rust:1.94-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash deploy/ci.sh
