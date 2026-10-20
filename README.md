@@ -32,3 +32,11 @@ together; the email is matched case-insensitively):
 Alternatively set `CUBBY_BOOTSTRAP_PARENT=parent@example.com` in `server.env`: at startup, if the
 registry holds no families yet, one is created for that email (later restarts are no-ops).
 Existing families, including ones inserted by hand, are untouched.
+
+## Icons
+
+The rendered icons in `web/static/assets/icons/` are committed, and nothing in the build produces
+them. Their source geometry is `web/icons-src/mark.svg` (rounded: favicon, PWA icons) and
+`mark-bleed.svg` (full-bleed: apple-touch, maskable). To change them, re-export the PNG/ICO sizes
+from those SVGs with any rasteriser (e.g. `rsvg-convert -w 512 mark.svg`), keep the `-v1` filename
+suffix bumped for cache-busting, and commit the results. There is no Python in this repo.
