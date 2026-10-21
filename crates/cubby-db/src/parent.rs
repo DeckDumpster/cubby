@@ -933,19 +933,30 @@ mod tests {
         let f = LibraryFilter::default();
         let g = library_groups(&c, &f).unwrap();
         assert_eq!(
-            g.iter().map(|g| (g.key.as_str(), g.count)).collect::<Vec<_>>(),
+            g.iter()
+                .map(|g| (g.key.as_str(), g.count))
+                .collect::<Vec<_>>(),
             [("direct", 1), ("ch1", 3)]
         );
         assert_eq!(g[1].playlists.len(), 1);
         let (total, v) = library_videos(&c, &f, "ch1", None, "plays", 0, 2).unwrap();
         assert_eq!((total, v.len()), (3, 2));
-        assert_eq!((v[0].youtube_id.as_str(), v[0].plays, v[0].watched_s), ("v1", 3, 100.0));
+        assert_eq!(
+            (v[0].youtube_id.as_str(), v[0].plays, v[0].watched_s),
+            ("v1", 3, 100.0)
+        );
         let (t, v) = library_videos(&c, &f, "ch1", None, "title", 0, 10).unwrap();
         assert_eq!((t, v.len()), (3, 3));
-        let one = LibraryFilter { child: Some("a".into()), ..f.clone() };
+        let one = LibraryFilter {
+            child: Some("a".into()),
+            ..f.clone()
+        };
         let (_, v) = library_videos(&c, &one, "ch1", None, "time", 0, 10).unwrap();
         assert_eq!((v[0].plays, v[0].watched_s), (2, 90.0));
-        let q = LibraryFilter { q: Some("thr".into()), ..f.clone() };
+        let q = LibraryFilter {
+            q: Some("thr".into()),
+            ..f.clone()
+        };
         let g = library_groups(&c, &q).unwrap();
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].count, 1);
