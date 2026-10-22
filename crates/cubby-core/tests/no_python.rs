@@ -8,7 +8,10 @@ fn find_py(dir: &Path, out: &mut Vec<String>) {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if path.is_dir() {
-            if !matches!(name.as_ref(), ".git" | "target" | "node_modules" | ".svelte-kit") {
+            if !matches!(
+                name.as_ref(),
+                ".git" | "target" | "node_modules" | ".svelte-kit"
+            ) {
                 find_py(&path, out);
             }
         } else if name.ends_with(".py") {

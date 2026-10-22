@@ -265,12 +265,20 @@ async fn the_library_lists_groups_then_a_groups_videos_and_searches_them() {
     assert_eq!(lib["groups"][0]["key"], "ch1");
     assert_eq!(lib["groups"][0]["count"], 2);
     let (_, vids) = e
-        .parent("GET", "/api/parent/library/videos?group=ch1&sort=plays", None)
+        .parent(
+            "GET",
+            "/api/parent/library/videos?group=ch1&sort=plays",
+            None,
+        )
         .await;
     assert_eq!(vids["total"], 2);
     assert_eq!(vids["videos"][0]["plays"], 0);
     let (s, by_title) = e
-        .parent("GET", "/api/parent/library/videos?group=ch1&sort=title", None)
+        .parent(
+            "GET",
+            "/api/parent/library/videos?group=ch1&sort=title",
+            None,
+        )
         .await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(by_title["total"], 2);
