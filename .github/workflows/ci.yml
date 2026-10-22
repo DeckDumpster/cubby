@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 30
     container:
       # Keep in step with `image` in .spira/testenv.toml.
-      image: docker.io/library/rust:1.94-bookworm
+      image: docker.io/library/rust:1.99.1-bookworm
     steps:
       - uses: actions/checkout@v4
       - run: bash deploy/ci.sh
