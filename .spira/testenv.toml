@@ -3,6 +3,9 @@
 image = "docker.io/library/rust:1.94-bookworm"
 workdir = "/work"
 timeout = 1800
+# ci_entry is the command a queue.local round runs on a round VM (read by the
+# harness's gate::own::ci_entry): the whole of CI, which is what ci.yml gates on.
+ci_entry = "bash deploy/ci.sh"
 default = ["ci"]
 
 [tier.ci]
