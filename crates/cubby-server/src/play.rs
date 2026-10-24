@@ -316,6 +316,48 @@ pub(crate) fn remaining_json_for(
     Ok(remaining_json(budget::remaining(&b, u)))
 }
 
+/// One child's progress against the limits, from the same budget, usage and clock functions the
+/// play path decides with. An unlimited limit is `null`, never a number.
+pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Value> {
+    let b = load_budget(conn, child)?;
+    let tz = child_tz(conn, child)?;
+    let u = usage(conn, child, &b, now)?;
+    let r = budget::remaining(&b, u);
+    let oldest: Option<i64> = conn.query_row(
+        "SELECT MIN(granted_at) FROM play_grants WHERE child_id=?1 AND granted_at>=?2",
+        params![child, now - b.window_s],
+        |r| r.get(0),
+    )?;
+    let live = conn
+        .query_row(
+            "SELECT g.youtube_id, COALESCE(v.title,''), g.granted_at, COALESCE(g.watched_s,0)
+             FROM play_grants g LEFT JOIN videos v ON v.youtube_id=g.youtube_id
+             WHERE g.child_id=?1 AND g.ended_at IS NULL AND COALESCE(g.last_beat_at,g.granted_at)>=?2
+             ORDER BY g.granted_at DESC LIMIT 1",
+            params![child, now - budget::BEAT_TIMEOUT_S],
+            |r| {
+                Ok(json!({"youtube_id": r.get::<_, String>(0)?, "title": r.get::<_, String>(1)?,
+                    "since": r.get::<_, i64>(2)?, "minutes": r.get::<_, f64>(3)? / 60.0}))
+            },
+        )
+        .optional()?;
+    let next_open = budget::next_window_start(&b.daily_windows, &tz, now);
+    let closes = budget::current_window_end(&b.daily_windows, &tz, now);
+    let side = |limit: Option<f64>, used: f64, left: Option<f64>| {
+        json!({"limit": limit, "used": used, "left": left.map(|l| l.max(0.0)),
+            "reached": left.is_some_and(|l| l <= 0.0)})
+    };
+    Ok(json!({
+        "child_id": child, "tz": tz,
+        "videos": side(b.video_equivalents, u.charge, r.videos),
+        "minutes": side(b.minutes_cap, u.watched_s / 60.0, r.minutes),
+        "resets_at": oldest.map(|t| t + b.window_s),
+        "window": {"restricted": !b.daily_windows.is_empty(), "open": next_open.is_none(),
+            "opens_at": next_open, "closes_at": closes},
+        "watching": live,
+    }))
+}
+
 fn remaining_json(r: Remaining) -> Value {
     json!({"videos": r.videos, "minutes": r.minutes})
 }

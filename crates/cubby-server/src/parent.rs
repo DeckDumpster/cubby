@@ -26,6 +26,7 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/parent/parents", get(parents))
         .route("/api/parent/children", get(children).post(add_child))
+        .route("/api/parent/progress", get(progress))
         .route("/api/parent/children/{id}", put(edit_child))
         .route("/api/parent/children/{id}/budget", put(set_budget))
         .route("/api/parent/children/{id}/history", get(child_history))
@@ -113,6 +114,20 @@ async fn children(
                 "daily_windows": windows},
             "devices": devs,
         }));
+    }
+    Ok(Json(Value::Array(out)))
+}
+
+/// Each child's usage and what is left, computed by the play path's own budget code.
+async fn progress(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+) -> Result<Json<Value>> {
+    let c = conn(&s, &f)?;
+    let now = unix_now();
+    let mut out = vec![];
+    for k in store::list_children(&c)? {
+        out.push(crate::play::progress_json(&c, &k.id, now).map_err(ApiError::internal)?);
     }
     Ok(Json(Value::Array(out)))
 }

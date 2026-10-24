@@ -212,3 +212,33 @@ for (const scheme of ['light', 'dark'])
 				expect(gap.gap).toBeGreaterThanOrEqual(gap.token - 0.5);
 				if (shots) await page.screenshot({ path: `${shots}/children-${n}dev-${scheme}-${w}.png`, fullPage: true });
 			});
+
+const PROGRESS = [
+	{ child_id: 'c1', tz: 'America/Chicago', videos: { limit: 3, used: 1.5, left: 1.5, reached: false }, minutes: { limit: 60, used: 15, left: 45, reached: false },
+		resets_at: 1792900000, window: { restricted: false, open: true, opens_at: null, closes_at: null },
+		watching: { youtube_id: 'abc', title: 'How volcanoes work', since: 1792880000, minutes: 2 } },
+	{ child_id: 'c2', tz: 'America/Chicago', videos: { limit: 3, used: 3, left: 0, reached: true }, minutes: { limit: null, used: 12, left: null, reached: false },
+		resets_at: 1792900000, window: { restricted: true, open: false, opens_at: 1792910000, closes_at: null }, watching: null }
+];
+
+test('the progress card shows used and left against the limits and who is watching', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.route('**/api/parent/**', (route) => {
+		const u = route.request().url();
+		const body = u.includes('/progress') ? PROGRESS : u.includes('/children') ? CHILDREN : u.includes('/policies') ? POLICIES : [];
+		return route.fulfill({ json: body });
+	});
+	await page.goto('/parent');
+	const maya = page.getByRole('article', { name: 'Maya progress' });
+	await expect(maya).toContainText('Watching now: How volcanoes work');
+	await expect(maya).toContainText('1.5 left');
+	await expect(maya).toContainText('45 left');
+	await expect(maya).toContainText('15 of 60 used');
+	const theo = page.getByRole('article', { name: 'Theo progress' });
+	await expect(theo).toContainText('limit reached');
+	await expect(theo).toContainText('No limit');
+	await expect(theo).toContainText('Viewing is closed');
+	const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+	expect(overflow).toBe(false);
+	if (shots) await page.screenshot({ path: `${shots}/progress-390.png`, fullPage: true });
+});

@@ -167,6 +167,18 @@ pub fn next_window_start(windows: &[(u32, u32)], tz: &str, now: i64) -> Option<i
     next.or(closed)
 }
 
+/// When `now` is inside a daily window, the unix time that window closes; else `None`.
+pub fn current_window_end(windows: &[(u32, u32)], tz: &str, now: i64) -> Option<i64> {
+    let ts = jiff::Timestamp::from_second(now).ok()?;
+    let local = ts.to_zoned(jiff::tz::TimeZone::get(tz).ok()?);
+    let secs =
+        i64::from(local.hour()) * 3600 + i64::from(local.minute()) * 60 + i64::from(local.second());
+    windows
+        .iter()
+        .find(|&&(s, e)| i64::from(s) * 60 <= secs && secs < i64::from(e) * 60)
+        .map(|&(_, e)| now + i64::from(e) * 60 - secs)
+}
+
 /// Parses `[["07:00","19:00"]]`-style pairs as the budgets column stores them.
 pub fn parse_windows(pairs: &[(String, String)]) -> Option<Vec<(u32, u32)>> {
     fn hm(s: &str) -> Option<u32> {
@@ -217,6 +229,16 @@ mod tests {
 
     /// 2026-10-14 12:00:00 UTC, a Wednesday.
     const NOON_UTC: i64 = 1_791_979_200;
+
+    #[test]
+    fn the_current_window_ends_when_its_end_time_comes() {
+        let w = [(7 * 60, 19 * 60)];
+        assert_eq!(
+            current_window_end(&w, "UTC", NOON_UTC),
+            Some(NOON_UTC + 7 * 3600)
+        );
+        assert_eq!(current_window_end(&w, "UTC", NOON_UTC + 8 * 3600), None);
+    }
 
     #[test]
     fn a_forward_scrub_earns_no_watched_time() {
