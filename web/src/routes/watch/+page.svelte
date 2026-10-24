@@ -56,6 +56,10 @@
 	let suggestions = $state<Tile[]>([]);
 	let sent = $state<Record<string, boolean>>({});
 	let host: HTMLDivElement | undefined = $state();
+	// Fullscreen is Cubby's own container, never the YouTube iframe. 'api' = element fullscreen,
+	// 'fill' = the CSS fixed-viewport fallback (iPhone Safari, WKWebView without element fullscreen).
+	let box: HTMLDivElement | undefined = $state();
+	let fsMode = $state<'off' | 'api' | 'fill'>('off');
 
 	let player: any = null;
 	let grantId = '';
@@ -93,9 +97,17 @@
 			if (urlQuery) runSearch(urlQuery);
 		}
 		const leave = () => leaveWatch();
+		const fsChange = () => {
+			if (fsMode === 'api' && !fsElement()) fsMode = 'off';
+		};
 		addEventListener('pagehide', leave);
+		document.addEventListener('fullscreenchange', fsChange);
+		document.addEventListener('webkitfullscreenchange', fsChange);
 		return () => {
 			removeEventListener('pagehide', leave);
+			document.removeEventListener('fullscreenchange', fsChange);
+			document.removeEventListener('webkitfullscreenchange', fsChange);
+			exitFullscreen();
 			destroyPlayer();
 		};
 	});
@@ -160,6 +172,48 @@
 
 	function onSearchInput() {
 		if (!query.trim() && urlQuery) home();
+	}
+
+	function fsElement(): Element | null {
+		const d = document as any;
+		return d.fullscreenElement ?? d.webkitFullscreenElement ?? null;
+	}
+
+	function fsEnabled() {
+		const d = document as any;
+		return !!(d.fullscreenEnabled || d.webkitFullscreenEnabled) && !!(box && ((box as any).requestFullscreen || (box as any).webkitRequestFullscreen));
+	}
+
+	async function enterFullscreen() {
+		if (!box) return;
+		if (fsEnabled()) {
+			try {
+				const b = box as any;
+				await (b.requestFullscreen ? b.requestFullscreen() : b.webkitRequestFullscreen());
+				fsMode = 'api';
+				return;
+			} catch {
+				/* refused: use the fill fallback */
+			}
+		}
+		fsMode = 'fill';
+	}
+
+	function exitFullscreen() {
+		if (fsMode === 'api' && fsElement()) {
+			const d = document as any;
+			try {
+				(d.exitFullscreen ?? d.webkitExitFullscreen)?.call(d);
+			} catch {
+				/* already out */
+			}
+		}
+		fsMode = 'off';
+	}
+
+	function toggleFullscreen() {
+		if (fsMode === 'off') enterFullscreen();
+		else exitFullscreen();
 	}
 
 	function destroyPlayer() {
@@ -275,6 +329,7 @@
 	}
 
 	async function back() {
+		exitFullscreen();
 		await leaveWatch();
 		view = 'grid';
 		current = null;
@@ -460,40 +515,45 @@
 				<h1>All done for now</h1>
 				<button class="primary" onclick={back}>OK</button>
 			</div>
-		{:else if view === 'ended'}
-			<div class="card" data-testid="end-card">
-				<h1>That was fun!</h1>
-				{#if badgeInfo}<p data-testid="end-budget">{badgeInfo.text}</p>{/if}
-				<div class="grid">{#each suggestions as t (t.youtube_id)}{@render tile(t)}{/each}</div>
-				<button class="primary" onclick={back}>Back to all videos</button>
-			</div>
-		{:else if view === 'playing' && current}
-			<h1 class="now">{current.title}</h1>
-			<div class="stage">
-				<div class="player" class:hidden={paused} class:unsettled={!settled} data-settled={settled} bind:this={host}></div>
-				{#if !settled && !paused}
-					<div class="ready" data-testid="ready-frame"><h2 class="break">Getting your video ready…</h2></div>
-				{/if}
-				{#if paused}
-					<div class="pause" data-testid="pause-card">
-						<h2 class="break">Taking a break?</h2>
-						<button class="primary" data-testid="resume" onclick={resume}>Keep watching</button>
-						<button onclick={back}>All done</button>
+		{:else if view === 'ended' || (view === 'playing' && current)}
+			<div class="fsbox" class:fs={fsMode !== 'off'} class:fill={fsMode === 'fill'} data-testid="fsbox" data-fs={fsMode} bind:this={box}>
+				{#if view === 'ended'}
+					<div class="card" data-testid="end-card">
+						<h1>That was fun!</h1>
+						{#if badgeInfo}<p data-testid="end-budget">{badgeInfo.text}</p>{/if}
+						<div class="grid">{#each suggestions as t (t.youtube_id)}{@render tile(t)}{/each}</div>
+						<button class="primary" onclick={back}>Back to all videos</button>
+					</div>
+				{:else if current}
+					<h1 class="now">{current.title}</h1>
+					<div class="stage">
+						<div class="player" class:hidden={paused} class:unsettled={!settled} data-settled={settled} bind:this={host}></div>
+						{#if !settled && !paused}
+							<div class="ready" data-testid="ready-frame"><h2 class="break">Getting your video ready…</h2></div>
+						{/if}
+						{#if paused}
+							<div class="pause" data-testid="pause-card">
+								<h2 class="break">Taking a break?</h2>
+								<button class="primary" data-testid="resume" onclick={resume}>Keep watching</button>
+								<button onclick={back}>All done</button>
+							</div>
+						{/if}
+					</div>
+					<div class="controls" data-testid="controls">
+						<button class="big" data-testid="playpause" aria-label={playing ? 'Pause' : 'Play'} onclick={toggle}>{playing ? '⏸' : '▶'}</button>
+						<input type="range" aria-label="seek" min="0" max={dur || 0} step="1" value={pos} oninput={seek} />
+						<span data-testid="clock">{clock(pos)} / {dur ? `-${clock(dur - pos)}` : '--:--'}</span>
+						<button class="big" data-testid="fullscreen" aria-pressed={fsMode !== 'off'} aria-label={fsMode === 'off' ? 'Full screen' : 'Exit full screen'} onclick={toggleFullscreen}>{fsMode === 'off' ? '⛶' : '✕'}</button>
+					</div>
+					<div class="actions">
+						<button disabled={sent[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
+							{sent[`like:${current.youtube_id}`] ? 'Asked! 👍' : '👍 I like this'}
+						</button>
+						<button disabled={sent[`more-from-channel:${current.youtube_id}`]} onclick={() => ask('more-from-channel')}>
+							{sent[`more-from-channel:${current.youtube_id}`] ? 'Asked!' : 'More from this channel'}
+						</button>
 					</div>
 				{/if}
-			</div>
-			<div class="controls" data-testid="controls">
-				<button class="big" data-testid="playpause" aria-label={playing ? 'Pause' : 'Play'} onclick={toggle}>{playing ? '⏸' : '▶'}</button>
-				<input type="range" aria-label="seek" min="0" max={dur || 0} step="1" value={pos} oninput={seek} />
-				<span data-testid="clock">{clock(pos)} / {dur ? `-${clock(dur - pos)}` : '--:--'}</span>
-			</div>
-			<div class="actions">
-				<button disabled={sent[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
-					{sent[`like:${current.youtube_id}`] ? 'Asked! 👍' : '👍 I like this'}
-				</button>
-				<button disabled={sent[`more-from-channel:${current.youtube_id}`]} onclick={() => ask('more-from-channel')}>
-					{sent[`more-from-channel:${current.youtube_id}`] ? 'Asked!' : 'More from this channel'}
-				</button>
 			</div>
 		{/if}
 	{/if}
@@ -570,5 +630,9 @@
 	.controls { display: flex; gap: var(--space-4); align-items: center; margin-top: var(--space-4); }
 	.controls input { flex: 1; min-height: var(--touch); padding: 0; accent-color: var(--accent); }
 	.controls span { font-variant-numeric: tabular-nums; font-weight: 700; }
+	.fsbox.fs { background: var(--bg, var(--surface)); overflow: auto; padding: var(--space-3); box-sizing: border-box; display: flex; flex-direction: column; }
+	.fsbox.fill { position: fixed; inset: 0; z-index: 1000; width: 100dvw; height: 100dvh; padding: max(var(--space-3), env(safe-area-inset-top)) max(var(--space-3), env(safe-area-inset-right)) max(var(--space-3), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left)); }
+	.fsbox.fs .stage { aspect-ratio: auto; flex: 1; min-height: 0; }
+	.fsbox.fs h1.now, .fsbox.fs .actions { display: none; }
 	.big { font-size: 2rem; min-width: 5rem; min-height: 4rem; }
 </style>

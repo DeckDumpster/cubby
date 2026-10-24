@@ -283,3 +283,57 @@ test.describe('leaving a search', () => {
 		await expect(page.getByLabel('search')).toHaveValue('golden');
 	});
 });
+
+const startPlaying = async (page) => {
+	await page.setViewportSize({ width: 1024, height: 768 });
+	await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	await page.evaluate(() => window.__state(1));
+};
+
+test('the fullscreen toggle fullscreens Cubby\'s container, not the iframe, and follows system exit', async ({ page }) => {
+	await startPlaying(page);
+	const fs = page.getByTestId('fullscreen');
+	await expect(fs).toHaveAccessibleName('Full screen');
+	await fs.click();
+	await expect(fs).toHaveAccessibleName('Exit full screen');
+	expect(await page.evaluate(() => document.fullscreenElement?.getAttribute('data-testid'))).toBe('fsbox');
+	expect(await page.evaluate(() => !!document.fullscreenElement.querySelector('iframe') && document.fullscreenElement.tagName)).toBe('DIV');
+	await page.evaluate(() => document.exitFullscreen());
+	await expect(fs).toHaveAccessibleName('Full screen');
+	await expect(page.getByTestId('fsbox')).toHaveAttribute('data-fs', 'off');
+});
+
+test('with element fullscreen unavailable the toggle fills the viewport with CSS', async ({ page }) => {
+	await page.addInitScript(() => {
+		Object.defineProperty(document, 'fullscreenEnabled', { value: false });
+		Object.defineProperty(document, 'webkitFullscreenEnabled', { value: false });
+	});
+	await startPlaying(page);
+	await page.getByTestId('fullscreen').click();
+	const box = page.getByTestId('fsbox');
+	await expect(box).toHaveAttribute('data-fs', 'fill');
+	expect(await page.evaluate(() => document.fullscreenElement)).toBe(null);
+	const r = await box.boundingBox();
+	expect(r).toMatchObject({ x: 0, y: 0, width: 1024, height: 768 });
+	await page.getByTestId('fullscreen').click();
+	await expect(box).toHaveAttribute('data-fs', 'off');
+});
+
+test('pausing in fullscreen shows the Resume screen inside the container and hides the iframe', async ({ page }) => {
+	await startPlaying(page);
+	await page.getByTestId('fullscreen').click();
+	await page.evaluate(() => window.__state(2));
+	await expect(page.getByTestId('fsbox').getByTestId('pause-card')).toBeVisible();
+	await expect(page.locator('iframe[title="fake player"]')).toBeHidden();
+});
+
+test('the end card renders inside the fullscreen container', async ({ page }) => {
+	await startPlaying(page);
+	await page.getByTestId('fullscreen').click();
+	await page.evaluate(() => window.__state(0));
+	await expect(page.getByTestId('fsbox').getByTestId('end-card')).toBeVisible();
+	expect(await page.evaluate(() => document.fullscreenElement?.getAttribute('data-testid'))).toBe('fsbox');
+});
