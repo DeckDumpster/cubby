@@ -233,7 +233,10 @@ mod tests {
     #[test]
     fn the_current_window_ends_when_its_end_time_comes() {
         let w = [(7 * 60, 19 * 60)];
-        assert_eq!(current_window_end(&w, "UTC", NOON_UTC), Some(NOON_UTC + 7 * 3600));
+        assert_eq!(
+            current_window_end(&w, "UTC", NOON_UTC),
+            Some(NOON_UTC + 7 * 3600)
+        );
         assert_eq!(current_window_end(&w, "UTC", NOON_UTC + 8 * 3600), None);
     }
 
