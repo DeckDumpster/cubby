@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import Progress from '$lib/Progress.svelte';
 	import { ParentState, setParent } from '$lib/parentState.svelte.js';
 
 	let { children } = $props();
@@ -35,6 +36,7 @@
 	<h1><span class="logo" aria-hidden="true">C</span> Cubby <small>parent</small></h1>
 	<a class="signout" href="/auth/logout" data-sveltekit-reload>Sign out</a>
 </header>
+<Progress />
 <nav class="tabs" aria-label="Sections">
 	{#each sections as [key, label] (key)}
 		{@const href = `/parent/${key}`}

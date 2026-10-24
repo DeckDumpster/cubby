@@ -633,3 +633,67 @@ async fn an_unknown_handle_is_a_400_with_a_message_and_stores_nothing() {
     let (_, pols) = e.parent("GET", "/api/parent/policies", None).await;
     assert_eq!(pols.as_array().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn progress_reports_used_and_left_against_the_budget_and_who_is_watching() {
+    let e = env().await;
+    e.videos();
+    let (child, _tok) = e.child_with_device().await;
+    let (s, _) = e
+        .parent(
+            "PUT",
+            &format!("/api/parent/children/{child}/budget"),
+            Some(json!({"video_equivalents": 3.0, "minutes_cap": 60, "window_s": 86400})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let t = now();
+    let dev: String = e
+        .family()
+        .query_row("SELECT id FROM devices LIMIT 1", [], |r| r.get(0))
+        .unwrap();
+    e.family()
+        .execute(
+            "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,watched_s,charge,ended_at,end_reason) VALUES
+             ('g1',?1,?2,'v1',?3,?3,300,0.5,?3,'ended'),
+             ('g2',?1,?2,'v2',?4,?4,600,1.0,?4,'ended')",
+            rusqlite::params![child, dev, t - 7200, t - 3600],
+        )
+        .unwrap();
+
+    let (s, p) = e.parent("GET", "/api/parent/progress", None).await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    let k = &p[0];
+    assert_eq!(k["child_id"], child.as_str());
+    assert_eq!(k["videos"]["limit"], 3.0);
+    assert_eq!(k["videos"]["used"], 1.5);
+    assert_eq!(k["videos"]["left"], 1.5);
+    assert_eq!(k["minutes"]["limit"], 60.0);
+    assert_eq!(k["minutes"]["used"], 15.0);
+    assert_eq!(k["minutes"]["left"], 45.0);
+    assert_eq!(k["resets_at"], t - 7200 + 86400);
+    assert_eq!(k["window"]["restricted"], false);
+    assert!(k["watching"].is_null());
+
+    e.family()
+        .execute(
+            "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,watched_s,charge)
+             VALUES ('g3',?1,?2,'v1',?3,?4,120,0.2)",
+            rusqlite::params![child, dev, t - 130, t - 5],
+        )
+        .unwrap();
+    let (_, p) = e.parent("GET", "/api/parent/progress", None).await;
+    assert_eq!(p[0]["watching"]["title"], "one");
+    assert_eq!(p[0]["watching"]["minutes"], 2.0);
+}
+
+#[tokio::test]
+async fn progress_says_no_limit_for_unlimited_budgets() {
+    let e = env().await;
+    let (_child, _tok) = e.child_with_device().await;
+    let (_, p) = e.parent("GET", "/api/parent/progress", None).await;
+    assert!(p[0]["videos"]["limit"].is_null());
+    assert!(p[0]["videos"]["left"].is_null());
+    assert!(p[0]["minutes"]["limit"].is_null());
+    assert!(p[0]["resets_at"].is_null());
+}
