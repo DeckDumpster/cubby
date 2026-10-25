@@ -179,3 +179,46 @@ export function offList(/** @type {any} */ player, /** @type {string} */ granted
 		return false;
 	}
 }
+
+/** Minutes left at which the "videos will stop" nudge first shows. */
+export const NUDGE_MIN = 5;
+
+/**
+ * Whole videos that can still be started after the one now starting, from the remaining
+ * counts the play call returned (before this video is charged). `null` when unlimited.
+ * @param {number | null | undefined} videos
+ */
+export function moreAfterThis(videos) {
+	if (videos == null) return null;
+	return Math.max(0, Math.floor(videos) - 1);
+}
+
+/** @param {number} n */
+export function startNotice(n) {
+	return n <= 0 ? 'This is the last video.' : `You can watch ${n} more video${n === 1 ? '' : 's'} after this one.`;
+}
+
+/**
+ * Minutes until videos stop: the budget minutes or the closing of the daily window, whichever is first.
+ * @param {{ minutes?: number | null, window_left_s?: number | null }} r
+ */
+export function minutesLeft(r) {
+	const a = r.minutes ?? null;
+	const b = r.window_left_s == null ? null : r.window_left_s / 60;
+	if (a == null) return b;
+	return b == null ? a : Math.min(a, b);
+}
+
+/**
+ * The nudge to show now, given minutes left and how far the nudges have got (0 none, 1 threshold, 2 last minute).
+ * @param {number | null} mins
+ * @param {number} stage
+ * @param {number} [threshold]
+ * @returns {{ text: string, stage: number } | null}
+ */
+export function timeNotice(mins, stage, threshold = NUDGE_MIN) {
+	if (mins == null || mins <= 0) return null;
+	if (mins <= 1 && stage < 2) return { text: 'After 1 more minute, videos will stop.', stage: 2 };
+	if (mins <= threshold && stage < 1) return { text: `After ${Math.ceil(mins)} more minutes, videos will stop.`, stage: 1 };
+	return null;
+}

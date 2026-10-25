@@ -471,8 +471,17 @@ pub(crate) fn remaining_json_for(
     now: i64,
 ) -> rusqlite::Result<Value> {
     let b = load_budget(conn, child, now)?;
-    let u = usage(conn, child, &child_tz(conn, child)?, now)?;
-    Ok(remaining_json(budget::remaining(&b, u)))
+    let tz = child_tz(conn, child)?;
+    let u = usage(conn, child, &tz, now)?;
+    let left = budget::current_window_end(&b.daily_windows, &tz, now).map(|e| e - now);
+    Ok(remaining_json(budget::remaining(&b, u), left))
+}
+
+/// Seconds until the child's daily viewing window closes; `None` when unrestricted.
+fn window_left_s(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Option<i64>> {
+    let b = load_budget(conn, child, now)?;
+    let tz = child_tz(conn, child)?;
+    Ok(budget::current_window_end(&b.daily_windows, &tz, now).map(|e| e - now))
 }
 
 /// One child's progress against the limits, from the same budget, usage and clock functions the
@@ -532,8 +541,14 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
     }))
 }
 
-fn remaining_json(r: Remaining) -> Value {
-    json!({"videos": r.videos, "minutes": r.minutes, "ve_minutes": r.ve_minutes})
+/// `window_left_s` is how long the daily viewing window stays open, `null` when unrestricted.
+fn remaining_json(r: Remaining, window_left_s: Option<i64>) -> Value {
+    json!({
+        "videos": r.videos,
+        "minutes": r.minutes,
+        "ve_minutes": r.ve_minutes,
+        "window_left_s": window_left_s,
+    })
 }
 
 impl From<PlayError> for ApiError {
@@ -572,7 +587,9 @@ async fn play_route(
     Json(body): Json<PlayBody>,
 ) -> Result<Json<Value>, ApiError> {
     let conn = open_own(&state, &family_id)?;
-    let outcome = play(&conn, &dev, &body.youtube_id, unix_now())?;
+    let now = unix_now();
+    let outcome = play(&conn, &dev, &body.youtube_id, now)?;
+    let window_left = window_left_s(&conn, &dev.child_id, now).map_err(PlayError::from)?;
     let (label, reason) = match &outcome {
         PlayOutcome::Granted { .. } => ("granted", ""),
         PlayOutcome::Refused { reason, .. } => ("refused", *reason),
@@ -592,7 +609,7 @@ async fn play_route(
         PlayOutcome::Granted {
             grant_id,
             remaining,
-        } => json!({"grant_id": grant_id, "remaining": remaining_json(remaining)}),
+        } => json!({"grant_id": grant_id, "remaining": remaining_json(remaining, window_left)}),
         PlayOutcome::Refused { reason, next_start } => {
             json!({"refused": reason, "next_start": next_start,
                 "limit": limit_json(&conn, &dev.child_id, unix_now()).map_err(ApiError::internal)?})
@@ -608,7 +625,9 @@ async fn beat_route(
     Json(body): Json<BeatBody>,
 ) -> Result<Json<Value>, ApiError> {
     let conn = open_own(&state, &family_id)?;
-    let o = beat(&conn, &dev, &id, body.position_s, unix_now())?;
+    let now = unix_now();
+    let o = beat(&conn, &dev, &id, body.position_s, now)?;
+    let window_left = window_left_s(&conn, &dev.child_id, now).map_err(PlayError::from)?;
     if o.watched_delta_s > 0.0 {
         let l = vec![("child", dev.child_id.clone())];
         push(&state, "cubby_watch_seconds", o.watched_delta_s, "s", l);
@@ -617,7 +636,7 @@ async fn beat_route(
         let l = vec![("child", dev.child_id.clone())];
         push(&state, "cubby_charge", o.charge_delta, "1", l);
     }
-    let mut v = json!({"remaining": remaining_json(o.remaining), "stop": o.stop.is_some(),
+    let mut v = json!({"remaining": remaining_json(o.remaining, window_left), "stop": o.stop.is_some(),
         "limit": limit_json(&conn, &dev.child_id, unix_now()).map_err(ApiError::internal)?});
     if let Some(grace) = o.stop {
         v["grace_s"] = json!(grace);

@@ -477,3 +477,88 @@ for (const [name, size] of [['ipad', { width: 820, height: 1180 }], ['phone', { 
 		await expect(page.getByTestId('recent-row')).toBeVisible();
 	});
 }
+
+// sp-gqmccx: the child's notices live in Cubby's own area, never over the player.
+const OUT = process.env.SHOTS_DIR ?? 'screenshots';
+
+async function routeBeats(page, minutes) {
+	let n = 0;
+	await page.route('**/api/child/grant/*/beat', (r) =>
+		r.fulfill({ json: { remaining: { videos: 2, minutes: minutes[Math.min(n++, minutes.length - 1)] }, stop: false } })
+	);
+}
+
+test('starting with a 3-video budget says "2 more videos"; the last allowed start says "This is the last video"', async ({ page }) => {
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 3, minutes: null } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.getByTestId('notice')).toHaveText(/You can watch 2 more videos after this one\./);
+	await page.evaluate(() => window.__state(1));
+	await page.screenshot({ path: `${OUT}/notice-start.png` });
+});
+
+test('the last allowed start shows "This is the last video"', async ({ page }) => {
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 1, minutes: null } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.getByTestId('notice')).toContainText('This is the last video.');
+});
+
+test('unlimited limits show no notice', async ({ page }) => {
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: null, minutes: null } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	await expect(page.getByTestId('notice')).toHaveCount(0);
+});
+
+test('with 6 minutes left, playing past the 5-minute mark shows the stop nudge once, then 1 minute', async ({ page }) => {
+	await page.clock.install();
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 5, minutes: 6 } } });
+	await routeBeats(page, [5.8, 4.9, 4.7, 4.5, 0.9, 0.8]);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	const notice = page.getByTestId('notice');
+	await expect(notice).toContainText('4 more videos');
+	await page.evaluate(() => window.__state(1));
+	await page.clock.runFor(10_100);
+	await expect(notice).toContainText('4 more videos');
+	await page.clock.runFor(10_100);
+	await expect(notice).toHaveText(/After 5 more minutes, videos will stop\./);
+	await page.screenshot({ path: `${OUT}/notice-nudge.png` });
+	await page.clock.runFor(20_200);
+	await expect(notice).toHaveText(/After 5 more minutes/);
+	await page.clock.runFor(10_100);
+	await expect(notice).toHaveText(/After 1 more minute, videos will stop\./);
+});
+
+test('the daily window closing counts as time left', async ({ page }) => {
+	await page.clock.install();
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 5, minutes: null, window_left_s: 240 } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.getByTestId('notice')).toContainText('After 4 more minutes, videos will stop.');
+});
+
+for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { width: 820, height: 1180 }]]) {
+	test(`a notice is never drawn over the player at ${name} width, and stays in fullscreen`, async ({ page }) => {
+		await setup(page, { play: { grant_id: 'g1', remaining: { videos: 3, minutes: null } } });
+		await page.setViewportSize(size);
+		await page.goto('/watch');
+		await page.getByRole('button', { name: /First video/ }).click();
+		await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+		await page.evaluate(() => window.__state(1));
+		const n = await page.getByTestId('notice').boundingBox();
+		const p = await page.locator('.player').boundingBox();
+		expect(n.y).toBeGreaterThanOrEqual(p.y + p.height - 1);
+		await page.screenshot({ path: `${OUT}/notice-${name}.png` });
+		await page.getByTestId('fullscreen').click();
+		await expect(page.getByTestId('notice')).toBeVisible();
+		await expect.poll(async () => {
+			const n2 = await page.getByTestId('notice').boundingBox();
+			const p2 = await page.locator('.player').boundingBox();
+			return n2.y - (p2.y + p2.height - 1);
+		}).toBeGreaterThanOrEqual(0);
+		await page.screenshot({ path: `${OUT}/notice-${name}-fullscreen.png` });
+	});
+}

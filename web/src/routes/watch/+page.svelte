@@ -12,6 +12,10 @@
 		clock,
 	endReason,
 		graceText,
+		minutesLeft,
+		moreAfterThis,
+		startNotice,
+		timeNotice,
 		loadYT,
 		localUrl,
 		offList,
@@ -25,7 +29,7 @@
 	} from '$lib/child.js';
 
 	type Tile = { youtube_id: string; title: string; channel_title?: string; channel_avatar?: string; thumb?: string };
-	type Remaining = { videos: number | null; minutes: number | null };
+	type Remaining = { videos: number | null; minutes: number | null; window_left_s?: number | null };
 
 	const SHOWN = 8;
 	const origin = typeof location === 'undefined' ? 'http://localhost' : location.origin;
@@ -53,6 +57,10 @@
 	let view = $state<'grid' | 'loading' | 'playing' | 'ended' | 'refused' | 'stopped'>('grid');
 	let current = $state<Tile | null>(null);
 	let refusal = $state('');
+	// Cubby's own notice under the player (never over it): what is left, and the stop nudge.
+	let notice = $state('');
+	let nudgeStage = 0;
+	let prevVideos: number | null = null;
 	let paused = $state(false);
 	let playing = $state(false);
 	// False from every start, resume and seek until PLAYING has lasted SETTLE_MS: the iframe stays visibility:hidden meanwhile.
@@ -331,8 +339,27 @@
 		const { status, data } = await api(`/api/child/grant/${grantId}/beat`, { body: { position_s: position, state } });
 		if (status !== 200) return;
 		remaining = data.remaining ?? remaining;
+		updateNotice(data.remaining);
 		if (data.limit) takeLimit(data.limit);
 		if (data.stop || locked) await finish('stop', 'stopped');
+	}
+
+	function updateNotice(r: Remaining | undefined) {
+		if (!r) return;
+		const v = r.videos;
+		// Charges only lower the count, so a rise is a parent grant: say so with the new total.
+		if (v != null && prevVideos != null && v > prevVideos + 0.01 && nudgeStage === 0) {
+			const n = moreAfterThis(v);
+			if (n != null) notice = startNotice(n);
+		}
+		prevVideos = v;
+		const mins = minutesLeft(r);
+		if (mins != null && mins > 5) nudgeStage = 0;
+		const n = timeNotice(mins, nudgeStage);
+		if (n) {
+			notice = n.text;
+			nudgeStage = n.stage;
+		}
 	}
 
 	async function closeGrant(reason: string) {
@@ -437,6 +464,11 @@
 		}
 		grantId = data.grant_id;
 		remaining = data.remaining ?? remaining;
+		nudgeStage = 0;
+		prevVideos = data.remaining?.videos ?? null;
+		const more = moreAfterThis(data.remaining?.videos);
+		notice = more == null ? '' : startNotice(more);
+		updateNotice(data.remaining);
 		view = 'playing';
 		await tick();
 		try {
@@ -680,6 +712,9 @@
 						<span data-testid="clock">{clock(pos)} / {dur ? `-${clock(dur - pos)}` : '--:--'}</span>
 						<button class="big" data-testid="fullscreen" aria-pressed={fsMode !== 'off'} aria-label={fsMode === 'off' ? 'Full screen' : 'Exit full screen'} onclick={toggleFullscreen}>{fsMode === 'off' ? '⛶' : '✕'}</button>
 					</div>
+					{#if notice}
+						<p class="notice" data-testid="notice" role="status"><span aria-hidden="true">⏰</span> {notice}</p>
+					{/if}
 					<div class="actions">
 						<button disabled={sent[`like:${current.youtube_id}`] || asking[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
 							{sent[`like:${current.youtube_id}`] ? 'Asked! 👍' : '👍 I like this'}
@@ -774,6 +809,7 @@
 	.searched h2 { margin: 0; }
 	.hidden { display: none; }
 	.stage:has(.hidden) { background: var(--surface); }
+	.notice { display: flex; gap: var(--space-3); align-items: center; margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: 12px; background: var(--surface-2, #fff4d6); color: inherit; border: 2px solid currentColor; font-size: 1.25rem; font-weight: 700; }
 	.controls { display: flex; gap: var(--space-4); align-items: center; margin-top: var(--space-4); }
 	.controls input { flex: 1; min-width: 0; min-height: var(--touch); padding: 0; accent-color: var(--accent); }
 	.controls span { font-variant-numeric: tabular-nums; font-weight: 700; }
