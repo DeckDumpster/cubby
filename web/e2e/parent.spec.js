@@ -261,11 +261,13 @@ for (const scheme of ['light', 'dark'])
 			await expect(bar).toBeVisible();
 			return bar.evaluate((el) => {
 				const span = el.firstElementChild;
-				return { ratio: span.getBoundingClientRect().width / el.getBoundingClientRect().width, bg: getComputedStyle(span).backgroundColor, track: getComputedStyle(el).backgroundColor };
+				const sr = span.getBoundingClientRect(), tr = el.getBoundingClientRect();
+				return { ratio: sr.width / tr.width, covers: sr.height >= tr.height - 1 && sr.height >= 8 && sr.top >= tr.top - 1 && sr.bottom <= tr.bottom + 1, tall: tr.height, bg: getComputedStyle(span).backgroundColor, track: getComputedStyle(el).backgroundColor };
 			});
 		};
 		const partial = await fill('Maya', 'Minutes');
 		expect(Math.abs(partial.ratio - 14.5 / 25)).toBeLessThan(0.03);
+		expect(partial.covers, `fill must span the track (track ${partial.tall}px tall)`).toBe(true);
 		expect(partial.bg).not.toBe(partial.track);
 		expect(partial.bg).not.toBe('rgba(0, 0, 0, 0)');
 		expect((await fill('Theo', 'Videos')).ratio).toBe(0);
