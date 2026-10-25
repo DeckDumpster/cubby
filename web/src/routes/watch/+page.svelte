@@ -691,7 +691,7 @@
 	.controls span { font-variant-numeric: tabular-nums; font-weight: 700; }
 	.fsbox.fs { background: var(--bg, var(--surface)); overflow: auto; padding: var(--space-3); box-sizing: border-box; display: flex; flex-direction: column; }
 	.fsbox.fill { position: fixed; inset: 0; z-index: 1000; width: 100dvw; height: 100dvh; padding: max(var(--space-3), env(safe-area-inset-top)) max(var(--space-3), env(safe-area-inset-right)) max(var(--space-3), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left)); }
-	.fsbox.fs .stage { aspect-ratio: auto; flex: 1; min-height: 0; }
+	.fsbox.fs .stage { aspect-ratio: auto; flex: 1 1 0; height: 0; min-height: 0; }
 	.fsbox.fs h1.now, .fsbox.fs .actions { display: none; }
 	.big { font-size: 2rem; min-width: 5rem; min-height: 4rem; }
 </style>
