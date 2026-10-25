@@ -23,7 +23,9 @@
 		parseRecent
 	} from '$lib/child.js';
 
-	type Tile = { youtube_id: string; title: string; channel_title?: string; channel_avatar?: string; thumb?: string };
+	type Tile = { youtube_id: string; title: string; channel_id?: string; channel_title?: string; channel_avatar?: string; thumb?: string };
+	type Channel = { channel_id: string; title: string; thumb?: string };
+	type ChannelPage = { channel: Channel; tiles: Tile[]; can_request: boolean; requested: boolean };
 	type Remaining = { videos: number | null; minutes: number | null };
 
 	const SHOWN = 8;
@@ -35,6 +37,8 @@
 	let child = $state<{ name?: string; avatar?: string }>({});
 	let remaining = $state<Remaining>({ videos: null, minutes: null });
 	let total = $state<number | null>(null);
+	let channels = $state<Channel[]>([]);
+	let channelPage = $state<ChannelPage | null>(null);
 	let sections = $state<{ key: string; title: string; tiles: Tile[] }[]>([]);
 	let expanded = $state<Record<string, boolean>>({});
 	let query = $state('');
@@ -99,6 +103,7 @@
 		remaining = data.remaining ?? remaining;
 		total = data.total_videos ?? total;
 		sections = parseHome(data).sections;
+		channels = data.channels ?? [];
 		loadRecentRow();
 	}
 
@@ -179,6 +184,43 @@
 	$effect(() => {
 		if (showRecent && untrack(() => paired)) untrack(() => loadRecentPage(true));
 	});
+
+	// /watch?channel=ID is a channel page; like search, the URL is the state so back leaves it.
+	const urlChannel = $derived(page.url.searchParams.get('channel') ?? '');
+	let channelSeq = 0;
+
+	async function loadChannel(id: string) {
+		const seq = ++channelSeq;
+		if (!id) {
+			channelPage = null;
+			return;
+		}
+		const { status, data } = await guarded(api(`/api/child/channel/${encodeURIComponent(id)}`));
+		if (seq !== channelSeq) return;
+		channelPage = status === 200 ? data : null;
+	}
+
+	$effect(() => {
+		const id = urlChannel;
+		if (untrack(() => paired)) loadChannel(id);
+	});
+
+	async function askForMore() {
+		if (!channelPage) return;
+		const id = channelPage.channel.channel_id;
+		const { status, data } = await api(`/api/child/channel/${encodeURIComponent(id)}/request`, { method: 'POST' });
+		if (status === 200 && channelPage) {
+			channelPage.can_request = data.can_request;
+			channelPage.requested = data.requested;
+		}
+	}
+
+	async function openChannel(id: string) {
+		await leaveWatch();
+		view = 'grid';
+		current = null;
+		await goto(`/watch?channel=${encodeURIComponent(id)}`, { noScroll: true });
+	}
 
 	async function runSearch(q: string) {
 		const seq = ++searchSeq;
@@ -530,6 +572,24 @@
 				</span>
 				<button class="primary" type="submit">Search</button>
 			</form>
+			{#if urlChannel}
+				<div class="searched">
+					<button type="button" class="home" onclick={() => goto('/watch', { noScroll: true })}>← Home</button>
+					<h2>{channelPage?.channel.title ?? 'Channel'}</h2>
+				</div>
+				{#if channelPage}
+					{#if channelPage.requested}
+						<p class="asked" data-testid="channel-waiting">Asked — waiting for a grown-up</p>
+					{:else if channelPage.can_request}
+						<button class="primary ask" data-testid="channel-ask" onclick={askForMore}>Ask for more from this channel</button>
+					{/if}
+					<section>
+						<div class="grid">{#each channelPage.tiles as t (t.youtube_id)}{@render tile(t)}{/each}</div>
+					</section>
+				{:else}
+					<p class="empty">Nothing here yet.</p>
+				{/if}
+			{:else}
 			{#if urlQuery}
 				<div class="searched">
 					<button type="button" class="home" onclick={home}>← Home</button>
@@ -575,6 +635,23 @@
 						</section>
 					{/if}
 				{/each}
+				{#if channels.length}
+					<section data-testid="channels-row">
+						<h2>Channels</h2>
+						<div class="chips">
+							{#each expanded.channels ? channels : channels.slice(0, SHOWN) as c (c.channel_id)}
+								<a class="chip" href="/watch?channel={encodeURIComponent(c.channel_id)}">
+									{#if localUrl(c.thumb, origin)}<img class="avatar" src={localUrl(c.thumb, origin)} alt="" />{:else}<span class="avatar blank"></span>{/if}
+									<span class="title">{c.title}</span>
+								</a>
+							{/each}
+						</div>
+						{#if !expanded.channels && channels.length > SHOWN}
+							<button class="more" onclick={() => (expanded.channels = true)}>See all</button>
+						{/if}
+					</section>
+				{/if}
+			{/if}
 			{/if}
 		{:else if view === 'loading'}
 			<p class="empty">One moment…</p>
@@ -599,6 +676,9 @@
 					</div>
 				{:else if current}
 					<h1 class="now">{current.title}</h1>
+					{#if current.channel_id && current.channel_title}
+						<p class="chan"><a href="/watch?channel={encodeURIComponent(current.channel_id)}" onclick={(e) => { e.preventDefault(); openChannel(current!.channel_id!); }}>{current.channel_title}</a></p>
+					{/if}
 					<div class="stage">
 						<div class="player" class:hidden={paused} class:unsettled={!settled && !blocked} data-settled={settled} bind:this={host}></div>
 						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -709,6 +789,13 @@
 	.clear { position: absolute; right: 0.25rem; top: 50%; transform: translateY(-50%); min-height: var(--touch); min-width: var(--touch); padding: 0; border: 0; background: none; font-size: 1.25rem; }
 	.searched { display: flex; gap: var(--space-4); align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; }
 	.searched h2 { margin: 0; }
+	.chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--space-3); }
+	.chip { display: flex; align-items: center; gap: var(--space-3); min-height: var(--touch); padding: var(--space-2) var(--space-3); border: 2px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); text-decoration: none; box-shadow: var(--shadow); }
+	.chip .avatar { width: 3rem; height: 3rem; object-fit: cover; background: var(--surface-2); }
+	.asked { font-weight: 700; color: var(--muted); margin: 0 0 var(--space-4); }
+	.ask { margin-bottom: var(--space-4); }
+	.chan { margin: 0 0 var(--space-3); font-size: 1.1rem; }
+	.chan a { color: var(--accent); font-weight: 700; }
 	.hidden { display: none; }
 	.stage:has(.hidden) { background: var(--surface); }
 	.controls { display: flex; gap: var(--space-4); align-items: center; margin-top: var(--space-4); }

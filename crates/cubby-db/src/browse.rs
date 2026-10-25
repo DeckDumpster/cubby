@@ -50,6 +50,127 @@ pub fn playable_videos(conn: &Connection, child_id: &str) -> rusqlite::Result<Ve
         .collect()
 }
 
+/// A channel that has at least one video the child may play.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChannelRow {
+    pub channel_id: String,
+    pub title: String,
+    /// Thumbnail of the channel's newest playable video.
+    pub thumb_path: Option<String>,
+    pub published_at: i64,
+}
+
+/// The child's channels, newest activity first. Built from `playable` only, so a channel with
+/// nothing the child may watch does not exist here.
+pub fn channels(conn: &Connection, child_id: &str) -> rusqlite::Result<Vec<ChannelRow>> {
+    let mut by_channel: Vec<ChannelRow> = Vec::new();
+    for v in playable_videos(conn, child_id)? {
+        if v.channel_id.is_empty() {
+            continue;
+        }
+        match by_channel.iter_mut().find(|c| c.channel_id == v.channel_id) {
+            Some(c) if v.published_at > c.published_at => {
+                c.title = v.channel_title;
+                c.thumb_path = v.thumb_path;
+                c.published_at = v.published_at;
+            }
+            Some(_) => {}
+            None => by_channel.push(ChannelRow {
+                channel_id: v.channel_id,
+                title: v.channel_title,
+                thumb_path: v.thumb_path,
+                published_at: v.published_at,
+            }),
+        }
+    }
+    by_channel.sort_by(|a, b| {
+        b.published_at
+            .cmp(&a.published_at)
+            .then_with(|| a.channel_id.cmp(&b.channel_id))
+    });
+    Ok(by_channel)
+}
+
+/// The playable videos of one channel, newest first.
+pub fn channel_videos(
+    conn: &Connection,
+    child_id: &str,
+    channel_id: &str,
+) -> rusqlite::Result<Vec<VideoRow>> {
+    let sql = format!(
+        "SELECT {COLUMNS} FROM playable p JOIN videos v ON v.youtube_id = p.youtube_id \
+         WHERE p.child_id = ?1 AND v.channel_id = ?2 \
+         ORDER BY v.fetched_at DESC, v.youtube_id"
+    );
+    conn.prepare(&sql)?
+        .query_map(params![child_id, channel_id], row)?
+        .collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChannelAsk {
+    /// The channel is already allowed as a whole for this child (or all children).
+    pub imported: bool,
+    /// The child has an open more-from-channel request for it.
+    pub requested: bool,
+}
+
+pub fn channel_ask(
+    conn: &Connection,
+    child_id: &str,
+    channel_id: &str,
+) -> rusqlite::Result<ChannelAsk> {
+    let imported = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM allow_policies WHERE kind='channel' AND youtube_id=?2 \
+           AND removed_at IS NULL AND (child_id IS NULL OR child_id=?1))",
+        params![child_id, channel_id],
+        |r| r.get(0),
+    )?;
+    let requested = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM requests q JOIN videos v ON v.youtube_id=q.youtube_id \
+           WHERE q.child_id=?1 AND q.kind='more-from-channel' AND q.resolved_at IS NULL \
+             AND v.channel_id=?2)",
+        params![child_id, channel_id],
+        |r| r.get(0),
+    )?;
+    Ok(ChannelAsk {
+        imported,
+        requested,
+    })
+}
+
+/// Files a more-from-channel request for the child, keyed to the channel's newest playable
+/// video. `None` when the child has no playable video there; otherwise the resulting state —
+/// an already-open request or an imported channel files nothing new.
+pub fn request_more_from_channel(
+    conn: &Connection,
+    child_id: &str,
+    channel_id: &str,
+    now: i64,
+) -> rusqlite::Result<Option<ChannelAsk>> {
+    let Some(newest) = channel_videos(conn, child_id, channel_id)?.into_iter().next() else {
+        return Ok(None);
+    };
+    let state = channel_ask(conn, child_id, channel_id)?;
+    if state.imported || state.requested {
+        return Ok(Some(state));
+    }
+    conn.execute(
+        "INSERT INTO requests(id,child_id,kind,youtube_id,created_at) \
+         VALUES (?1,?2,'more-from-channel',?3,?4)",
+        params![
+            ulid::Ulid::generate().to_string(),
+            child_id,
+            newest.youtube_id,
+            now
+        ],
+    )?;
+    Ok(Some(ChannelAsk {
+        imported: false,
+        requested: true,
+    }))
+}
+
 /// Turns free text into an FTS5 query that cannot be a syntax error: each word is a quoted
 /// term, the last one a prefix, all required. `None` when there is nothing to search for.
 pub fn fts_query(q: &str) -> Option<String> {
@@ -245,6 +366,51 @@ mod tests {
         allow(&c, "a", "kid", "approved");
         allow(&c, "b", "kid", "approved");
         assert_eq!(ids(search(&c, "kid", "train", 10).unwrap()), ["b", "a"]);
+    }
+
+    #[test]
+    fn channels_list_only_allowed_videos_including_one_offs() {
+        let c = open();
+        add_video(&c, "a1", "t", "Alpha", "[]", 5);
+        add_video(&c, "a2", "t", "Alpha", "[]", 0);
+        add_video(&c, "hidden", "t", "Alpha", "[]", 0);
+        add_video(&c, "b1", "t", "Beta", "[]", 9);
+        add_video(&c, "g1", "t", "Gamma", "[]", 0);
+        allow(&c, "a1", "kid", "approved");
+        allow(&c, "a2", "kid", "auto-allowed");
+        allow(&c, "b1", "kid", "approved");
+        allow(&c, "g1", "sib", "approved");
+        let ch = channels(&c, "kid").unwrap();
+        assert_eq!(
+            ch.iter().map(|c| c.channel_id.as_str()).collect::<Vec<_>>(),
+            ["Alpha", "Beta"]
+        );
+        assert_eq!(ids(channel_videos(&c, "kid", "Alpha").unwrap()), ["a2", "a1"]);
+        assert!(channel_videos(&c, "kid", "Gamma").unwrap().is_empty());
+    }
+
+    #[test]
+    fn requesting_more_files_one_open_request_and_not_for_imported_channels() {
+        let c = open();
+        add_video(&c, "a1", "t", "Alpha", "[]", 5);
+        add_video(&c, "a2", "t", "Alpha", "[]", 0);
+        allow(&c, "a1", "kid", "approved");
+        assert_eq!(
+            request_more_from_channel(&c, "kid", "Alpha", 7).unwrap(),
+            Some(ChannelAsk { imported: false, requested: true })
+        );
+        request_more_from_channel(&c, "kid", "Alpha", 8).unwrap();
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM requests WHERE kind='more-from-channel'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        assert!(!channel_ask(&c, "sib", "Alpha").unwrap().requested);
+        assert_eq!(request_more_from_channel(&c, "sib", "Alpha", 9).unwrap(), None);
+
+        c.execute_batch("INSERT INTO allow_policies VALUES('cp','channel','Alpha','kid',0,NULL);")
+            .unwrap();
+        let st = channel_ask(&c, "kid", "Alpha").unwrap();
+        assert!(st.imported);
     }
 
     #[test]

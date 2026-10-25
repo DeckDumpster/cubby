@@ -4,9 +4,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use cubby_core::rank::{ChildCtx, Ranker, V1Ranker, VideoMeta, rank_checked};
 use cubby_db::browse::{self, History, VideoRow};
@@ -62,6 +62,8 @@ pub fn router(api: ChildApi) -> Router {
         .route("/api/child/search", get(search))
         .route("/api/child/next", get(next))
         .route("/api/child/recent", get(recent))
+        .route("/api/child/channel/{id}", get(channel))
+        .route("/api/child/channel/{id}/request", post(channel_request))
         .with_state(api)
 }
 
@@ -69,6 +71,7 @@ fn tile(v: &VideoRow) -> Value {
     json!({
         "youtube_id": v.youtube_id,
         "title": v.title,
+        "channel_id": v.channel_id,
         "channel_title": v.channel_title,
         "duration_s": v.duration_s,
         "thumb": v.thumb_path.as_ref().map(|p| format!("/thumbs/{p}?v={}", v.published_at)),
@@ -168,9 +171,20 @@ fn home_with(
             |r| Ok(json!({"name": r.get::<_, String>(0)?, "avatar": r.get::<_, String>(1)?})),
         )
         .unwrap_or(Value::Null);
+    let channels: Vec<Value> = browse::channels(conn, child_id)?
+        .iter()
+        .map(|c| {
+            json!({
+                "channel_id": c.channel_id,
+                "title": c.title,
+                "thumb": c.thumb_path.as_ref().map(|p| format!("/thumbs/{p}?v={}", c.published_at)),
+            })
+        })
+        .collect();
     Ok(json!({
         "child": child,
         "remaining": remaining,
+        "channels": channels,
         "sections": [
             {"key": "continue", "title": "Keep watching", "tiles": cont},
             {"key": "liked_channels", "title": "From channels you like", "tiles": ranked(ranker, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
@@ -248,6 +262,61 @@ async fn search(
     })))
 }
 
+fn ask_json(a: browse::ChannelAsk) -> Value {
+    json!({"can_request": !a.imported && !a.requested, "requested": a.requested && !a.imported})
+}
+
+/// One channel's allowed videos, newest first. A channel with none for this child is a 404,
+/// the same answer as a channel that does not exist.
+fn channel_json(conn: &Connection, child_id: &str, id: &str) -> rusqlite::Result<Option<Value>> {
+    let rows = browse::channel_videos(conn, child_id, id)?;
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    let ask = browse::channel_ask(conn, child_id, id)?;
+    Ok(Some(json!({
+        "channel": {"channel_id": id, "title": first.channel_title},
+        "tiles": rows.iter().map(tile).collect::<Vec<_>>(),
+        "can_request": !ask.imported && !ask.requested,
+        "requested": ask.requested && !ask.imported,
+    })))
+}
+
+fn channel_request_json(
+    conn: &Connection,
+    child_id: &str,
+    id: &str,
+    now: i64,
+) -> rusqlite::Result<Option<Value>> {
+    Ok(browse::request_more_from_channel(conn, child_id, id, now)?.map(ask_json))
+}
+
+async fn channel(
+    State(api): State<ChildApi>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let child = authed(&api, &headers)?;
+    let conn = api.db.lock().unwrap();
+    channel_json(&conn, &child, &id)
+        .map_err(db_err)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn channel_request(
+    State(api): State<ChildApi>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let child = authed(&api, &headers)?;
+    let conn = api.db.lock().unwrap();
+    channel_request_json(&conn, &child, &id, (api.now)())
+        .map_err(db_err)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
 #[derive(Deserialize)]
 struct RecentParams {
     limit: Option<usize>,
@@ -299,6 +368,8 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/child/search", get(search_route))
         .route("/api/child/next", get(next_route))
         .route("/api/child/recent", get(recent_route))
+        .route("/api/child/channel/{id}", get(channel_route))
+        .route("/api/child/channel/{id}/request", post(channel_request_route))
 }
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
@@ -356,4 +427,30 @@ async fn next_route(
     next_with(&V1Ranker, now, remaining, &conn, &dev.child_id, &p.after)
         .map(Json)
         .map_err(internal)
+}
+
+async fn channel_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let conn = open_own(&state, &family_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    channel_json(&conn, &dev.child_id, &id)
+        .map_err(db_err)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn channel_request_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let conn = open_own(&state, &family_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    channel_request_json(&conn, &dev.child_id, &id, crate::play::unix_now())
+        .map_err(db_err)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
