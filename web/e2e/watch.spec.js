@@ -466,9 +466,11 @@ for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { w
 		await page.screenshot({ path: `${OUT}/notice-${name}.png` });
 		await page.getByTestId('fullscreen').click();
 		await expect(page.getByTestId('notice')).toBeVisible();
-		const n2 = await page.getByTestId('notice').boundingBox();
-		const p2 = await page.locator('.player').boundingBox();
-		expect(n2.y).toBeGreaterThanOrEqual(p2.y + p2.height - 1);
+		await expect.poll(async () => {
+			const n2 = await page.getByTestId('notice').boundingBox();
+			const p2 = await page.locator('.player').boundingBox();
+			return n2.y - (p2.y + p2.height - 1);
+		}).toBeGreaterThanOrEqual(0);
 		await page.screenshot({ path: `${OUT}/notice-${name}-fullscreen.png` });
 	});
 }
