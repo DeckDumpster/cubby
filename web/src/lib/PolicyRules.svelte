@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, rulesBody } from '$lib/parent.js';
+	import { api, rulesBody, withPhrase } from '$lib/parent.js';
 	import { getParent } from '$lib/parentState.svelte.js';
 	import type { Policy } from '$lib/parentState.svelte.js';
 
@@ -11,7 +11,7 @@
 
 	const saved = $derived(policy.rules);
 	const text = (n: number | null | undefined) => (n == null ? '' : String(n));
-	let form = $state({ exclude_shorts: false, min: '', max: '', has: '', lacks: '' });
+	let form = $state({ exclude_shorts: false, min: '', max: '', has: [] as string[], lacks: [] as string[], addHas: '', addLacks: '' });
 	let counts: Counts | null = $state(null);
 	let bad = $state(false);
 	let open = $state(false);
@@ -23,8 +23,10 @@
 			exclude_shorts: saved?.exclude_shorts ?? false,
 			min: text(saved?.min_minutes),
 			max: text(saved?.max_minutes),
-			has: (saved?.title_has ?? []).join(', '),
-			lacks: (saved?.title_lacks ?? []).join(', ')
+			has: [...(saved?.title_has ?? [])],
+			lacks: [...(saved?.title_lacks ?? [])],
+			addHas: '',
+			addLacks: ''
 		};
 		counts = null;
 	}
@@ -58,6 +60,18 @@
 		}, 250);
 	}
 
+	function add(which: 'has' | 'lacks') {
+		const key = which === 'has' ? 'addHas' : 'addLacks';
+		form[which] = withPhrase(form[which], form[key]);
+		form[key] = '';
+		changed();
+	}
+
+	function drop(which: 'has' | 'lacks', i: number) {
+		form[which] = form[which].filter((_, j) => j !== i);
+		changed();
+	}
+
 	async function save() {
 		const body = rulesBody(form);
 		if (!body) return;
@@ -73,10 +87,29 @@
 		<label class="check"><input type="checkbox" bind:checked={form.exclude_shorts} onchange={changed} /> Exclude Shorts (60 seconds or less)</label>
 		<label>Shortest, minutes <input inputmode="decimal" bind:value={form.min} oninput={changed} /></label>
 		<label>Longest, minutes <input inputmode="decimal" bind:value={form.max} oninput={changed} /></label>
-		<label>Title contains one of <input placeholder="e.g. episode, full" bind:value={form.has} oninput={changed} /></label>
-		<label>Title contains none of <input placeholder="e.g. compilation, mix" bind:value={form.lacks} oninput={changed} /></label>
+		{#each [{ k: 'has', label: 'Title contains any of', add: 'addHas', ph: 'e.g. episode' }, { k: 'lacks', label: 'Title contains none of', add: 'addLacks', ph: 'e.g. how to' }] as g (g.k)}
+			{@const which = g.k as 'has' | 'lacks'}
+			<fieldset class="phrases">
+				<legend>{g.label}</legend>
+				{#if form[which].length}
+					<ul class="chips">
+						{#each form[which] as ph, i (ph)}
+							<li class="chip"><span class="grow">{ph}</span> <button type="button" aria-label="Remove {ph}" onclick={() => drop(which, i)}>−</button></li>
+						{/each}
+					</ul>
+				{/if}
+				<div class="add">
+					<input aria-label="Add a phrase to {g.label}" placeholder={g.ph} bind:value={form[g.add as 'addHas' | 'addLacks']} onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(which); } }} />
+					<button type="button" aria-label="Add phrase to {g.label}" onclick={() => add(which)}>+</button>
+				</div>
+				<small class="muted">Matches anywhere in the title, ignoring case. A phrase is matched whole, spaces included.</small>
+			</fieldset>
+		{/each}
 	</div>
 	{#if bad}<p class="error" role="alert">Durations are numbers of minutes, and the shortest cannot exceed the longest.</p>{/if}
+	{#if !counts && policy.allowed_count != null}
+		<p class="count" aria-live="polite"><b>{policy.allowed_count}</b> allowed · <b>{policy.excluded_count ?? 0}</b> filtered out</p>
+	{/if}
 	{#if counts}
 		<p class="count" aria-live="polite"><b>{counts.allowed}</b> allowed · <b>{counts.excluded}</b> excluded (not saved yet)</p>
 		{#if counts.excluded_videos.length}
@@ -107,6 +140,11 @@
 	ul { list-style: none; margin: 0; padding: 0; }
 	li { display: flex; gap: var(--space-3); padding: var(--space-1) 0; }
 	.grow { flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; }
+	.phrases { border: 0; padding: 0; margin: 0; display: grid; gap: var(--space-1); min-width: 0; }
+	.chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+	.chip { display: flex; align-items: center; gap: var(--space-1); padding: 0 0 0 var(--space-2); border: 1px solid var(--muted); border-radius: 999px; }
+	.add { display: flex; gap: var(--space-1); }
+	.add input { flex: 1 1 auto; min-width: 0; }
 	.actions { display: flex; gap: var(--space-2); }
 	.muted { color: var(--muted); font-size: 0.85rem; }
 </style>

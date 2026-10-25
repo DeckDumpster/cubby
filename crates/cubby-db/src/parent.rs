@@ -290,17 +290,28 @@ pub struct Rules {
 /// Keep in step with `family_v6.sql`.
 pub const SHORT_MAX_S: i64 = 60;
 
+/// Strips one leading/trailing quote pair, straight or curly: `"how to"` is the phrase `how to`.
+fn unquote(s: &str) -> &str {
+    for (open, close) in [('"', '"'), ('\u{201c}', '\u{201d}'), ('\'', '\'')] {
+        if let Some(inner) = s.strip_prefix(open).and_then(|r| r.strip_suffix(close)) {
+            return inner;
+        }
+    }
+    s
+}
+
 impl Rules {
     pub fn is_empty(&self) -> bool {
         *self == Rules::default()
     }
 
-    /// Lowercased, trimmed, de-duplicated words; blanks dropped.
+    /// Lowercased, trimmed, de-duplicated phrases with one surrounding quote pair removed;
+    /// blanks dropped. A phrase is matched whole, spaces and commas included.
     pub fn normalised(&self) -> Rules {
         let words = |w: &[String]| {
             let mut out: Vec<String> = w
                 .iter()
-                .map(|x| x.trim().to_lowercase())
+                .map(|x| unquote(x.trim()).trim().to_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect();
             out.sort();
@@ -1248,6 +1259,53 @@ mod tests {
         };
         set_rules(&c, &p, &rules).unwrap();
         assert_eq!(playable(&c, "a"), ["short"]);
+    }
+
+    #[test]
+    fn a_quoted_phrase_is_the_same_rule_as_the_bare_phrase() {
+        let c = mem();
+        c.execute_batch(
+            "INSERT INTO videos(youtube_id,title,channel_id,channel_title,duration_s,fetched_at) VALUES
+               ('draw','How To Draw a Cat','chr','R',600,1),
+               ('other','Cat songs','chr','R',600,1);",
+        )
+        .unwrap();
+        let p = add_policy(&c, "channel", "chr", None, 5).unwrap();
+        let rules = |w: &str| Rules {
+            title_lacks: vec![w.into()],
+            ..Rules::default()
+        };
+        set_rules(&c, &p, &rules("\"how to\"")).unwrap();
+        let quoted = get_rules(&c, &p).unwrap();
+        assert_eq!(quoted.title_lacks, ["how to"]);
+        assert_eq!(playable(&c, "a"), ["other"]);
+        set_rules(&c, &p, &rules("  How To ")).unwrap();
+        assert_eq!(get_rules(&c, &p).unwrap(), quoted);
+        set_rules(&c, &p, &rules("\u{201c}how to\u{201d}")).unwrap();
+        assert_eq!(get_rules(&c, &p).unwrap(), quoted);
+        set_rules(&c, &p, &rules("\"\"")).unwrap();
+        assert!(get_rules(&c, &p).unwrap().title_lacks.is_empty());
+    }
+
+    #[test]
+    fn a_phrase_with_a_comma_is_one_phrase_and_removing_it_unfilters() {
+        let c = mem();
+        let p = rule_channel(&c);
+        let rules = Rules {
+            title_lacks: vec!["episode 1-9, compilation".into()],
+            ..Rules::default()
+        };
+        set_rules(&c, &p, &rules).unwrap();
+        assert_eq!(get_rules(&c, &p).unwrap().title_lacks.len(), 1);
+        assert_eq!(playable(&c, "a"), ["comp", "ep", "short"]);
+        let rules = Rules {
+            title_lacks: vec!["episode 1-9 comp".into()],
+            ..Rules::default()
+        };
+        set_rules(&c, &p, &rules).unwrap();
+        assert_eq!(playable(&c, "a"), ["ep", "short"]);
+        set_rules(&c, &p, &Rules::default()).unwrap();
+        assert_eq!(playable(&c, "a"), ["comp", "ep", "short"]);
     }
 
     #[test]

@@ -336,3 +336,34 @@ test('a channel shows a live allowed/excluded count before its filters are saved
 	await expect.poll(() => puts.length).toBe(1);
 	expect(puts[0]).toMatchObject({ exclude_shorts: true, max_minutes: 30, min_minutes: null });
 });
+
+test('title filters are separate phrase chips and the count stays after saving', async ({ page }) => {
+	const policy = { ...POLICIES[0], rules: { exclude_shorts: false, min_minutes: null, max_minutes: null, title_has: ['episode', 'full show'], title_lacks: ['how to', 'a, b'] }, allowed_count: 3, excluded_count: 4 };
+	const puts = [];
+	await page.route('**/api/parent/**', (route) => {
+		const r = route.request();
+		const u = r.url();
+		if (u.endsWith('/rules/preview')) return route.fulfill({ json: { allowed: 2, excluded: 5, excluded_videos: [] } });
+		if (r.method() === 'PUT' && u.endsWith('/rules')) {
+			puts.push(r.postDataJSON());
+			return route.fulfill({ json: {} });
+		}
+		return route.fulfill({ json: u.includes('/children') ? CHILDREN : u.includes('/policies') ? [policy] : u.includes('/library') ? { groups: [] } : [] });
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto('/parent/allow');
+	await page.getByText('Filters', { exact: false }).first().click();
+	await expect(page.getByText('3 allowed · 4 filtered out')).toBeVisible();
+	await expect(page.getByText('how to', { exact: true })).toBeVisible();
+	await expect(page.getByText('a, b', { exact: true })).toBeVisible();
+	await page.getByLabel('Add a phrase to Title contains none of').fill('"Dance Party"');
+	await page.getByRole('button', { name: 'Add phrase to Title contains none of' }).click();
+	await expect(page.getByText('Dance Party', { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Remove how to' }).click();
+	await page.getByRole('button', { name: 'Save filters' }).click();
+	await expect.poll(() => puts.length).toBe(1);
+	expect(puts[0].title_lacks).toEqual(['a, b', 'Dance Party']);
+	expect(puts[0].title_has).toEqual(['episode', 'full show']);
+	await expect(page.getByText('filtered out')).toBeVisible();
+	if (shots) await page.screenshot({ path: `${shots}/title-filters-390.png`, fullPage: true });
+});
