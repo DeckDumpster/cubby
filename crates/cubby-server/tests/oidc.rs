@@ -286,3 +286,87 @@ async fn a_partial_oidc_configuration_is_refused() {
     let msg = r.unwrap_err();
     assert!(msg.contains("CUBBY_OIDC_CLIENT_SECRET"), "{msg}");
 }
+
+#[tokio::test]
+async fn a_session_survives_a_restart_and_a_tampered_or_logged_out_cookie_does_not() {
+    let e = env().await;
+    let cookie = sign_in(&e.router, &e.provider, PARENT)
+        .await
+        .cookie
+        .unwrap();
+    assert_eq!(e.api_status(Some(&cookie)).await, StatusCode::OK);
+
+    // A restart: a fresh AppState built from the same configuration.
+    let restarted = Env {
+        router: cubby_server::app(&e.config).unwrap(),
+        provider: e.provider.clone(),
+        config: e.config.clone(),
+    };
+    assert_eq!(restarted.api_status(Some(&cookie)).await, StatusCode::OK);
+
+    // Tampered payload, tampered signature, truncated, and signed under another key.
+    let (name, value) = cookie.split_once('=').unwrap();
+    let (payload, sig) = value.split_once('.').unwrap();
+    let flip = |s: &str| {
+        let mut c: Vec<char> = s.chars().collect();
+        c[0] = if c[0] == 'A' { 'B' } else { 'A' };
+        c.into_iter().collect::<String>()
+    };
+    for bad in [
+        format!("{name}={}.{sig}", flip(payload)),
+        format!("{name}={payload}.{}", flip(sig)),
+        format!("{name}={payload}"),
+        format!("{name}={payload}."),
+    ] {
+        assert_eq!(
+            restarted.api_status(Some(&bad)).await,
+            StatusCode::UNAUTHORIZED,
+            "{bad}"
+        );
+    }
+    let mut other = e.config.clone();
+    other.oidc.as_mut().unwrap().session_key = "another-key-0123456789abcdef012345".into();
+    let other = Env {
+        router: cubby_server::app(&other).unwrap(),
+        provider: e.provider.clone(),
+        config: other,
+    };
+    assert_eq!(
+        other.api_status(Some(&cookie)).await,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // An unsigned-in page request is sent to sign in, returning to where it was.
+    let (s, h) = restarted
+        .get("/parent/history", Some(&format!("{name}={payload}.x")))
+        .await;
+    assert_eq!(s, StatusCode::SEE_OTHER);
+    assert_eq!(
+        h[header::LOCATION].to_str().unwrap(),
+        "/auth/login?next=%2Fparent%2Fhistory"
+    );
+
+    // Logout ends it, and a copy of the cookie is refused afterwards.
+    let (s, _) = restarted.get("/auth/logout", Some(&cookie)).await;
+    assert_eq!(s, StatusCode::SEE_OTHER);
+    assert_eq!(
+        restarted.api_status(Some(&cookie)).await,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn the_session_key_is_required_and_long_enough() {
+    let e = env().await;
+    let lookup = |key: Option<&'static str>| {
+        Config::from_lookup(|k| match k {
+            "CUBBY_SESSION_KEY" => key.map(String::from),
+            k => e.provider.env(k),
+        })
+    };
+    for key in [None, Some("short")] {
+        let msg = lookup(key).unwrap_err();
+        assert!(msg.contains("CUBBY_SESSION_KEY"), "{msg}");
+    }
+    assert!(lookup(Some("0123456789abcdef0123456789abcdef")).is_ok());
+}

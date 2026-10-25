@@ -37,6 +37,14 @@ ensure_env() {
 }
 ensure_env CUBBY_OIDC_ISSUER https://id.gantt.pub
 ensure_env CUBBY_OIDC_BASE_URL https://cubby.gantt.pub
+# The key that signs the parent session cookie is random and carries no outside identity, so deploy
+# makes it once and never replaces it: replacing it would sign every parent out.
+if ! grep -qE '^CUBBY_SESSION_KEY=.{32,}' "$cfg_dir/server.env"; then
+    key_tmp="$(mktemp "$cfg_dir/server.env.XXXXXX")"
+    { grep -v '^CUBBY_SESSION_KEY=' "$cfg_dir/server.env" || true; } >"$key_tmp"
+    echo "CUBBY_SESSION_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" >>"$key_tmp"
+    chmod 0600 "$key_tmp"; mv "$key_tmp" "$cfg_dir/server.env"
+fi
 oidc_missing=()
 for k in CUBBY_OIDC_CLIENT_ID CUBBY_OIDC_CLIENT_SECRET; do
     grep -qE "^$k=.+" "$cfg_dir/server.env" || oidc_missing+=("$k")

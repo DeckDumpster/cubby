@@ -15,6 +15,7 @@ rusqlite.workspace = true
 ulid.workspace = true
 jsonwebtoken.workspace = true
 sha2.workspace = true
+hmac.workspace = true
 getrandom.workspace = true
 reqwest.workspace = true
 cubby-otel = { path = "../cubby-otel" }

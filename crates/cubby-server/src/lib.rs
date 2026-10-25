@@ -49,7 +49,8 @@ impl Config {
     /// Reads `CUBBY_BIND` (127.0.0.1), `CUBBY_PORT` (8790), `CUBBY_WEB_DIR` (web/build),
     /// `CUBBY_OTLP_ENDPOINT` (empty), `CUBBY_DATA_DIR` (data), `CUBBY_OIDC_ISSUER` /
     /// `CUBBY_OIDC_CLIENT_ID` / `CUBBY_OIDC_CLIENT_SECRET` / `CUBBY_OIDC_BASE_URL`, which are set
-    /// together or not at all, `CUBBY_OIDC_GROUP` (cubby-parents) and `CUBBY_SESSION_TTL_SECS`
+    /// together or not at all, `CUBBY_SESSION_KEY` (required with them, 32 or more characters; keys
+    /// the session cookie's signature, so sessions survive a restart), `CUBBY_OIDC_GROUP` (cubby-parents) and `CUBBY_SESSION_TTL_SECS`
     /// (28800).
     pub fn from_env() -> Result<Config, String> {
         Config::from_lookup(|k| std::env::var(k).ok())
@@ -78,6 +79,7 @@ impl Config {
             ),
             None => oidc::DEFAULT_SESSION_TTL,
         };
+        let session_key = var("CUBBY_SESSION_KEY");
         let oidc = match oidc_vars.map(var) {
             [None, None, None, None] => None,
             [
@@ -86,6 +88,16 @@ impl Config {
                 Some(client_secret),
                 Some(base_url),
             ] => Some(OidcConfig {
+                session_key: session_key
+                    .filter(|k| k.trim().len() >= oidc::MIN_SESSION_KEY_LEN)
+                    .ok_or_else(|| {
+                        format!(
+                            "CUBBY_SESSION_KEY must be set to at least {} characters",
+                            oidc::MIN_SESSION_KEY_LEN
+                        )
+                    })?
+                    .trim()
+                    .to_string(),
                 issuer,
                 client_id,
                 client_secret,

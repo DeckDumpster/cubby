@@ -161,6 +161,7 @@ export async function startStack({ ports = {}, publicBaseURL } = {}) {
 			CUBBY_OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
 			CUBBY_OIDC_CLIENT_ID: CLIENT_ID,
 			CUBBY_OIDC_CLIENT_SECRET: CLIENT_SECRET,
+			CUBBY_SESSION_KEY: 'e2e-session-key-0123456789abcdef0123',
 			CUBBY_OIDC_BASE_URL: publicBaseURL ?? `http://127.0.0.1:${port}`,
 			CUBBY_BOOTSTRAP_PARENT: PARENT_EMAIL,
 			CUBBY_YT_API_KEY: 'fake-key',
