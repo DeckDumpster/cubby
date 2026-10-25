@@ -197,18 +197,49 @@ export function offList(/** @type {any} */ player, /** @type {string} */ granted
 export const NUDGE_MIN = 5;
 
 /**
- * Whole videos that can still be started after the one now starting, from the remaining
- * counts the play call returned (before this video is charged). `null` when unlimited.
+ * Video equivalents left once the video now starting has been watched to the end, from the
+ * remaining counts the play call returned (before this video is charged). Videos are charged
+ * by watch time, so this video costs `duration_s / (ve_minutes * 60)`, not 1. `null` when
+ * unlimited. With no usable duration it falls back to charging one whole video.
  * @param {number | null | undefined} videos
+ * @param {number | null | undefined} [durationS]
+ * @param {number | null | undefined} [veMinutes]
  */
-export function moreAfterThis(videos) {
+export function videosAfterThis(videos, durationS, veMinutes) {
 	if (videos == null) return null;
-	return Math.max(0, Math.floor(videos) - 1);
+	const known = durationS != null && durationS > 0 && veMinutes != null && veMinutes > 0;
+	return videos - (known ? durationS / (veMinutes * 60) : 1);
 }
 
-/** @param {number} n */
+/**
+ * Whole videos that can still be started after the one now starting. `null` when unlimited.
+ * @param {number | null | undefined} videos
+ * @param {number | null | undefined} [durationS]
+ * @param {number | null | undefined} [veMinutes]
+ */
+export function moreAfterThis(videos, durationS, veMinutes) {
+	const after = videosAfterThis(videos, durationS, veMinutes);
+	if (after == null) return null;
+	const known = durationS != null && durationS > 0 && veMinutes != null && veMinutes > 0;
+	// An unknown length never claims "last" while a whole video's worth remains.
+	if (!known) {
+		const whole = Math.floor(videos ?? 0) - 1;
+		return whole >= 1 ? whole : (videos ?? 0) > 1 ? 0.5 : 0;
+	}
+	return after >= 1 ? Math.floor(after) : after > 0 ? 0.5 : after === 0 ? 0 : -1;
+}
+
+/**
+ * The start-of-video notice. `n` is `moreAfterThis`: a whole count, 0.5 for "a little more
+ * time" (less than a video left), 0 for the budget used up exactly, negative when it runs out mid-video.
+ * @param {number | null} n
+ */
 export function startNotice(n) {
-	return n <= 0 ? 'This is the last video.' : `You can watch ${n} more video${n === 1 ? '' : 's'} after this one.`;
+	if (n == null) return '';
+	if (n < 0) return 'This is the last video. Videos stop partway through this one.';
+	if (n === 0) return 'This is the last video.';
+	if (n < 1) return 'You have a little more time after this one.';
+	return `You can watch ${n} more video${n === 1 ? '' : 's'} after this one.`;
 }
 
 /**

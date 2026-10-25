@@ -26,9 +26,7 @@
 			{#each c.devices as d (d.id)}
 				<li>
 					<span class="grow">{d.label || 'device'}</span>
-					{#if d.revoked_at}<small>(revoked)</small>{:else}
-						<ActionButton class="danger" run={() => ps.act('POST', `/api/parent/devices/${d.id}/revoke`)} done="Revoked {d.label || 'the device'}" fail="revoke the device">Revoke</ActionButton>
-					{/if}
+					<ActionButton class="danger" run={() => ps.act('POST', `/api/parent/devices/${d.id}/revoke`)} done="Revoked {d.label || 'the device'}" fail="revoke the device">Revoke</ActionButton>
 				</li>
 			{/each}
 		</ul>

@@ -878,7 +878,7 @@ pub fn history(conn: &Connection, child: &str, limit: usize) -> Result<Vec<Grant
 pub fn list_devices(conn: &Connection) -> Result<Vec<DeviceRow>> {
     let mut s = conn.prepare(
         "SELECT id, child_id, label, paired_at, last_seen, revoked_at FROM devices
-         ORDER BY paired_at, id",
+         WHERE revoked_at IS NULL ORDER BY paired_at, id",
     )?;
     let rows = s.query_map([], |r| {
         Ok(DeviceRow {
@@ -1156,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn devices_list_with_their_revoked_state() {
+    fn devices_list_omits_the_revoked() {
         let c = mem();
         c.execute_batch(
             "INSERT INTO devices(id,child_id,token_hash,label,paired_at,revoked_at) VALUES
@@ -1164,8 +1164,10 @@ mod tests {
         )
         .unwrap();
         let d = list_devices(&c).unwrap();
-        assert_eq!(d.len(), 3);
-        assert_eq!(d.iter().find(|d| d.id == "d2").unwrap().revoked_at, Some(9));
+        assert_eq!(
+            d.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+            ["d1", "d3"]
+        );
     }
 
     #[test]

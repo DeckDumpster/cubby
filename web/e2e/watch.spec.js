@@ -50,10 +50,10 @@ const FAKE_PLAYER = () => {
 	window.__state = (s) => window.__players.at(-1).opts.events.onStateChange({ data: s });
 };
 
-async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200 } = {}) {
+async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200, fakePlayer = true } = {}) {
 	const calls = [];
 	await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
-	await page.addInitScript(FAKE_PLAYER);
+	if (fakePlayer) await page.addInitScript(FAKE_PLAYER);
 	await page.route('**/api/child/**', async (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname;
@@ -660,4 +660,67 @@ test.describe('every place has its own url', () => {
 		await expect(page.getByTestId('recent-all').locator('.tile')).toHaveCount(2);
 		await expect(page).toHaveTitle('Recently watched · Cubby');
 	});
+});
+
+/**
+ * Safari lets a cross-origin embed start with sound only shortly after a tap. This player honours that: playVideo
+ * works within ACTIVATION_MS of the last pointer tap, and is refused after. The player script loads slowly, as on a
+ * real network, so a script fetched only after the tap misses the window.
+ */
+async function setupActivationGated(page) {
+	await page.addInitScript(() => {
+		window.__tapAt = -1e9;
+		addEventListener('pointerdown', () => (window.__tapAt = performance.now()), true);
+	});
+	await page.route('https://www.youtube.com/iframe_api', async (route) => {
+		await new Promise((r) => setTimeout(r, 1500));
+		await route.fulfill({
+			contentType: 'text/javascript',
+			body: `(${(() => {
+				const ACTIVATION_MS = 1000;
+				window.__players = [];
+				window.YT = {
+					PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2 },
+					Player: class {
+						constructor(el, opts) {
+							this.opts = opts;
+							this.el = el;
+							el.innerHTML = '<iframe title="fake player"></iframe>';
+							window.__players.push(this);
+							setTimeout(() => opts.events.onReady({}), 50);
+						}
+						playVideo() {
+														if (performance.now() - window.__tapAt > ACTIVATION_MS) return;
+							setTimeout(() => this.opts.events.onStateChange({ data: 1 }), 20);
+						}
+						getCurrentTime() { return 1; }
+						getDuration() { return 100; }
+						getVideoData() { return { video_id: this.opts.videoId }; }
+						pauseVideo() {}
+						seekTo() {}
+						destroy() { this.el.innerHTML = ''; }
+					}
+				};
+				window.onYouTubeIframeAPIReady?.();
+			}).toString()})()`
+		});
+	});
+	await setup(page, { fakePlayer: false });
+}
+
+test('a tile tap reaches PLAYING with no Play press, even when the player script is slow @autoplay', async ({ page }) => {
+	await setupActivationGated(page);
+	await page.goto('/');
+	await page.waitForTimeout(2000);
+	await page.getByRole('link', { name: /First video/ }).click();
+	await expect(page.getByTestId('playpause')).toHaveAccessibleName('Pause', { timeout: 3000 });
+	await page.screenshot({ path: 'test-results/autoplay-tile-tap.png' });
+});
+
+test('a cold load of /videos/{id} has no activation and shows the Play control @autoplay', async ({ page }) => {
+	await setupActivationGated(page);
+	await page.goto('/videos/v1');
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	await expect(page.getByTestId('playpause')).toHaveAccessibleName('Play', { timeout: 6000 });
+	await page.screenshot({ path: 'test-results/autoplay-cold-load.png' });
 });

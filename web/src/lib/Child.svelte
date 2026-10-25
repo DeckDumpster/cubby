@@ -33,7 +33,7 @@
 	type Tile = { youtube_id: string; title: string; channel_id?: string; channel_title?: string; channel_avatar?: string; thumb?: string };
 	type Channel = { channel_id: string; title: string; thumb?: string };
 	type ChannelPage = { channel: Channel; tiles: Tile[]; can_request: boolean; requested: boolean };
-	type Remaining = { videos: number | null; minutes: number | null; window_left_s?: number | null };
+	type Remaining = { videos: number | null; minutes: number | null; window_left_s?: number | null; ve_minutes?: number | null };
 
 	const SHOWN = 8;
 	const origin = typeof location === 'undefined' ? 'http://localhost' : location.origin;
@@ -187,7 +187,10 @@
 
 	onMount(() => {
 		paired = !!token.get();
-		if (paired) loadHome();
+		if (paired) {
+			loadHome();
+			preloadPlayer();
+		}
 		const leave = () => leaveWatch();
 		const fsChange = () => {
 			if (fsMode === 'api' && !fsElement()) fsMode = 'off';
@@ -204,6 +207,11 @@
 		};
 	});
 
+	// Safari grants sound-on autoplay only for a moment after the tap, so the player script must already be here when the tap lands.
+	function preloadPlayer() {
+		loadYT(window as any).catch(() => {});
+	}
+
 	async function pair(e: Event) {
 		e.preventDefault();
 		pairError = '';
@@ -211,6 +219,7 @@
 		if (status === 200 && data?.token) {
 			token.set(data.token);
 			paired = true;
+			preloadPlayer();
 			await loadHome();
 		} else {
 			pairError = 'That code did not work. Ask a grown-up for a new one.';
@@ -550,7 +559,7 @@
 		remaining = data.remaining ?? remaining;
 		nudgeStage = 0;
 		prevVideos = data.remaining?.videos ?? null;
-		const more = moreAfterThis(data.remaining?.videos);
+		const more = moreAfterThis(data.remaining?.videos, data.duration_s, data.remaining?.ve_minutes);
 		notice = more == null ? '' : startNotice(more);
 		updateNotice(data.remaining);
 		view = 'playing';

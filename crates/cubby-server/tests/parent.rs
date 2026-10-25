@@ -497,7 +497,7 @@ async fn children_budgets_devices_and_history_are_reachable() {
     e.parent("POST", &format!("/api/parent/devices/{dev}/revoke"), None)
         .await;
     let (_, kids) = e.parent("GET", "/api/parent/children", None).await;
-    assert!(kids[0]["devices"][0]["revoked_at"].is_i64());
+    assert!(kids[0]["devices"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
