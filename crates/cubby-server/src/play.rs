@@ -415,7 +415,7 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
 }
 
 fn remaining_json(r: Remaining) -> Value {
-    json!({"videos": r.videos, "minutes": r.minutes})
+    json!({"videos": r.videos, "minutes": r.minutes, "ve_minutes": r.ve_minutes})
 }
 
 impl From<PlayError> for ApiError {
