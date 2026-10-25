@@ -17,20 +17,17 @@ export function isShell(ua) {
 }
 
 /**
- * @param {{ videos: number | null, minutes: number | null }} remaining
+ * @param {{ videos: number | null, minutes: number | null, ve_minutes?: number | null }} remaining
  * @param {number | null} total videos in a full budget, for the meter
  */
 export function badge(remaining, total) {
-	const { videos, minutes } = remaining;
-	if (videos != null) {
-		const n = Math.max(0, Math.floor(videos));
-		const text = n === 0 ? 'All done for today' : `${n} video${n === 1 ? '' : 's'} left today`;
-		return { text, frac: total ? Math.min(1, n / total) : n === 0 ? 0 : 1 };
-	}
-	if (minutes != null) {
-		const n = Math.max(0, Math.round(minutes));
-		return { text: n === 0 ? 'All done for today' : `${n} minute${n === 1 ? '' : 's'} left today`, frac: n === 0 ? 0 : 1 };
-	}
+	const { videos, minutes, ve_minutes } = remaining;
+	const v = videos != null ? Math.max(0, Math.floor(videos)) : null;
+	const m = minutes != null ? Math.max(0, Math.round(minutes)) : null;
+	if (v === 0 || m === 0) return { text: 'All done for today', frac: 0 };
+	const minutesBind = m != null && (v == null || (ve_minutes != null && ve_minutes > 0 && minutes != null && minutes < (videos ?? 0) * ve_minutes));
+	if (minutesBind) return { text: `${m} minute${m === 1 ? '' : 's'} left today`, frac: 1 };
+	if (v != null) return { text: `${v} video${v === 1 ? '' : 's'} left today`, frac: total ? Math.min(1, v / total) : 1 };
 	return null;
 }
 

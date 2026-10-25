@@ -43,6 +43,8 @@ pub struct Usage {
 pub struct Remaining {
     pub videos: Option<f64>,
     pub minutes: Option<f64>,
+    /// Minutes of watching that cost one video, so a client can tell which limit binds first.
+    pub ve_minutes: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +109,7 @@ pub fn remaining(b: &Budget, u: Usage) -> Remaining {
     Remaining {
         videos: b.video_equivalents.map(|v| v - u.charge),
         minutes: b.minutes_cap.map(|m| m - u.watched_s / 60.0),
+        ve_minutes: b.ve_minutes,
     }
 }
 
