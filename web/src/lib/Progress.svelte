@@ -13,7 +13,7 @@
 		resets_at: number | null;
 		window: { restricted: boolean; open: boolean; opens_at: number | null; closes_at: number | null };
 		watching: { title: string; minutes: number } | null;
-		grants: { id: string; at: number; expires_at: number; minutes: number; videos: number; by: string; note: string | null }[];
+		grants: { id: string; at: number; expires_at: number; minutes: number; videos: number; by: string; note: string | null; removed_at: number | null; removed_by: string | null }[];
 	};
 
 	const ps = getParent();
@@ -51,6 +51,16 @@
 	};
 	const extraText = (name: string, minutes: number, videos: number) =>
 		`Added ${[minutes ? `${num(minutes)} min` : '', videos ? `${num(videos)} video${videos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')} for ${name}`;
+
+	const remove = async (child: string, grantId: string) => {
+		failed = '';
+		try {
+			await api('DELETE', `/api/parent/children/${child}/extra/${grantId}`);
+			await load();
+		} catch {
+			failed = 'Could not remove that extra. Try again.';
+		}
+	};
 
 	const num = (n: number) => String(Math.round(n * 10) / 10);
 	const fmt = (label: string, n: number) => (label === 'Videos' ? n.toFixed(2) : num(n));
@@ -121,9 +131,14 @@
 				{#if r.grants?.length}
 					<ul class="grants" aria-label="Extra given today">
 						{#each r.grants as g (g.id)}
-							<li>
-								+{[g.minutes ? `${num(g.minutes)} min` : '', g.videos ? `${num(g.videos)} video${g.videos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')}
+							<li class:removed={g.removed_at !== null}>
+								<span class:struck={g.removed_at !== null}>+{[g.minutes ? `${num(g.minutes)} min` : '', g.videos ? `${num(g.videos)} video${g.videos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')}</span>
 								<small>· {g.by} · {when(g.at, r.tz)}{#if g.note} · {g.note}{/if}</small>
+								{#if g.removed_at !== null}
+									<small>· removed by {g.removed_by} at {when(g.removed_at, r.tz)}</small>
+								{:else}
+									<button type="button" class="remove" onclick={() => remove(r.child_id, g.id)}>(Remove)</button>
+								{/if}
 							</li>
 						{/each}
 					</ul>
@@ -154,5 +169,8 @@
 	.extra :global(button) { flex: 1 1 6rem; }
 	.extra input { flex: 1 1 4rem; min-width: 0; width: 4rem; }
 	.grants { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
+	.struck { text-decoration: line-through; }
+	.grants li { margin-bottom: var(--space-1); }
+	.remove { min-height: 2.75rem; min-width: 2.75rem; font: inherit; background: none; border: 0; color: var(--danger); text-decoration: underline; }
 	small { color: var(--muted); }
 </style>

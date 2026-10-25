@@ -871,3 +871,50 @@ async fn an_empty_or_absurd_extra_grant_is_refused() {
         .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn removing_a_grant_appends_a_reversal_and_lowers_the_limits() {
+    let e = env().await;
+    let (child, _tok) = e.child_with_device().await;
+    e.parent(
+        "PUT",
+        &format!("/api/parent/children/{child}/budget"),
+        Some(json!({"video_equivalents": 3.0, "minutes_cap": 60})),
+    )
+    .await;
+    let path = format!("/api/parent/children/{child}/extra");
+    e.parent("POST", &path, Some(json!({"minutes": 15}))).await;
+    let (_, g) = e.parent("POST", &path, Some(json!({"videos": 1}))).await;
+    let gid = g["id"].as_str().unwrap().to_string();
+
+    let (s, _) = e.parent("DELETE", &format!("{path}/{gid}"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    // Removing twice is a no-op.
+    let (s, _) = e.parent("DELETE", &format!("{path}/{gid}"), None).await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (_, p) = e.parent("GET", "/api/parent/progress", None).await;
+    let k = &p[0];
+    assert_eq!(k["videos"]["limit"], 3.0);
+    assert_eq!(k["minutes"]["limit"], 75.0);
+    let grants = k["grants"].as_array().unwrap();
+    assert_eq!(grants.len(), 2);
+    let removed: Vec<_> = grants.iter().filter(|g| g["removed_at"].is_i64()).collect();
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0]["id"], gid);
+    assert_eq!(removed[0]["removed_by"], PARENT);
+    assert_eq!(removed[0]["videos"], 1.0);
+}
+
+#[tokio::test]
+async fn a_grant_that_is_not_this_childs_cannot_be_removed() {
+    let e = env().await;
+    let (child, _tok) = e.child_with_device().await;
+    let path = format!("/api/parent/children/{child}/extra");
+    let (s, _) = e.parent("DELETE", &format!("{path}/nonesuch"), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = e
+        .parent("DELETE", "/api/parent/children/nobody/extra/nonesuch", None)
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
