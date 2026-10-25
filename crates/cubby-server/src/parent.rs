@@ -27,6 +27,7 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/parent/parents", get(parents))
         .route("/api/parent/children", get(children).post(add_child))
         .route("/api/parent/progress", get(progress))
+        .route("/api/parent/settings", get(settings).put(set_settings))
         .route("/api/parent/children/{id}", put(edit_child))
         .route("/api/parent/children/{id}/budget", put(set_budget))
         .route("/api/parent/children/{id}/extra", post(grant_extra))
@@ -248,6 +249,33 @@ async fn grant_extra(
     let grant = crate::play::grant_extra(&c, &id, b.videos, b.minutes, &by, note, unix_now())
         .map_err(ApiError::internal)?;
     Ok(Json(json!({"id": grant})))
+}
+
+/// Family-level settings: how long a child keeps browsing after the limit is reached.
+async fn settings(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+) -> Result<Json<Value>> {
+    let g = crate::play::grace_s(&conn(&s, &f)?).map_err(ApiError::internal)?;
+    Ok(Json(json!({"grace_minutes": g as f64 / 60.0})))
+}
+
+#[derive(Deserialize)]
+struct SettingsBody {
+    grace_minutes: f64,
+}
+
+async fn set_settings(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    Json(b): Json<SettingsBody>,
+) -> Result<Json<Value>> {
+    if !b.grace_minutes.is_finite() || !(0.0..=60.0).contains(&b.grace_minutes) {
+        return Err(bad("the grace is between 0 and 60 minutes"));
+    }
+    crate::play::set_grace_s(&conn(&s, &f)?, (b.grace_minutes * 60.0).round() as i64)
+        .map_err(ApiError::internal)?;
+    Ok(Json(json!({"ok": true})))
 }
 
 async fn child_history(

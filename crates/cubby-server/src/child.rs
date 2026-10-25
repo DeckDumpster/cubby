@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use cubby_core::rank::{ChildCtx, Ranker, V1Ranker, VideoMeta, rank_checked};
@@ -338,17 +339,34 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError::internal(e)
 }
 
+/// Browsing is refused once the grace is over; the body carries the limit so the page can say so.
+fn guard_locked(conn: &Connection, child: &str, now: i64) -> Result<Value, Response> {
+    let limit =
+        crate::play::limit_json(conn, child, now).map_err(|e| internal(e).into_response())?;
+    if limit["state"] == "locked" {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "locked", "limit": limit})),
+        )
+            .into_response());
+    }
+    Ok(limit)
+}
+
 async fn home_route(
     State(state): State<Arc<AppState>>,
     Extension(ParentOf(family_id)): Extension<ParentOf>,
     Extension(dev): Extension<Device>,
-) -> Result<Json<Value>, ApiError> {
-    let conn = open_own(&state, &family_id)?;
+) -> Result<Json<Value>, Response> {
+    let conn = open_own(&state, &family_id).map_err(IntoResponse::into_response)?;
     let now = crate::play::unix_now();
-    let remaining = crate::play::remaining_json_for(&conn, &dev.child_id, now).map_err(internal)?;
-    home_with(&V1Ranker, now, remaining, &conn, &dev.child_id)
-        .map(Json)
-        .map_err(internal)
+    let limit = guard_locked(&conn, &dev.child_id, now)?;
+    let remaining = crate::play::remaining_json_for(&conn, &dev.child_id, now)
+        .map_err(|e| internal(e).into_response())?;
+    let mut v = home_with(&V1Ranker, now, remaining, &conn, &dev.child_id)
+        .map_err(|e| internal(e).into_response())?;
+    v["limit"] = limit;
+    Ok(Json(v))
 }
 
 async fn search_route(
@@ -356,9 +374,11 @@ async fn search_route(
     Extension(ParentOf(family_id)): Extension<ParentOf>,
     Extension(dev): Extension<Device>,
     Query(p): Query<SearchParams>,
-) -> Result<Json<Value>, ApiError> {
-    let conn = open_own(&state, &family_id)?;
-    let found = browse::search(&conn, &dev.child_id, &p.q, SEARCH_LIMIT).map_err(internal)?;
+) -> Result<Json<Value>, Response> {
+    let conn = open_own(&state, &family_id).map_err(IntoResponse::into_response)?;
+    guard_locked(&conn, &dev.child_id, crate::play::unix_now())?;
+    let found = browse::search(&conn, &dev.child_id, &p.q, SEARCH_LIMIT)
+        .map_err(|e| internal(e).into_response())?;
     Ok(Json(json!({
         "q": p.q,
         "tiles": found.iter().map(tile).collect::<Vec<_>>(),
@@ -370,11 +390,12 @@ async fn recent_route(
     Extension(ParentOf(family_id)): Extension<ParentOf>,
     Extension(dev): Extension<Device>,
     Query(p): Query<RecentParams>,
-) -> Result<Json<Value>, ApiError> {
-    let conn = open_own(&state, &family_id)?;
+) -> Result<Json<Value>, Response> {
+    let conn = open_own(&state, &family_id).map_err(IntoResponse::into_response)?;
+    guard_locked(&conn, &dev.child_id, crate::play::unix_now())?;
     recent_json(&conn, &dev.child_id, &p)
         .map(Json)
-        .map_err(internal)
+        .map_err(|e| internal(e).into_response())
 }
 
 async fn next_route(
@@ -382,11 +403,14 @@ async fn next_route(
     Extension(ParentOf(family_id)): Extension<ParentOf>,
     Extension(dev): Extension<Device>,
     Query(p): Query<NextParams>,
-) -> Result<Json<Value>, ApiError> {
-    let conn = open_own(&state, &family_id)?;
+) -> Result<Json<Value>, Response> {
+    let conn = open_own(&state, &family_id).map_err(IntoResponse::into_response)?;
     let now = crate::play::unix_now();
-    let remaining = crate::play::remaining_json_for(&conn, &dev.child_id, now).map_err(internal)?;
-    next_with(&V1Ranker, now, remaining, &conn, &dev.child_id, &p.after)
-        .map(Json)
-        .map_err(internal)
+    let limit = guard_locked(&conn, &dev.child_id, now)?;
+    let remaining = crate::play::remaining_json_for(&conn, &dev.child_id, now)
+        .map_err(|e| internal(e).into_response())?;
+    let mut v = next_with(&V1Ranker, now, remaining, &conn, &dev.child_id, &p.after)
+        .map_err(|e| internal(e).into_response())?;
+    v["limit"] = limit;
+    Ok(Json(v))
 }

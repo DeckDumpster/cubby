@@ -90,3 +90,13 @@ test('parseRecent reads tiles and the more flag, and survives a bad payload', ()
 	assert.deepEqual(parseRecent({ tiles: [{ youtube_id: 'a' }], more: true }), { tiles: [{ youtube_id: 'a' }], more: true });
 	assert.deepEqual(parseRecent(null), { tiles: [], more: false });
 });
+
+import { graceText } from '../src/lib/child.js';
+
+test('the grace countdown reads in plain words', () => {
+	assert.equal(graceText(120), '2 minutes to look around');
+	assert.equal(graceText(61), '2 minutes to look around');
+	assert.equal(graceText(60), '60 seconds to look around');
+	assert.equal(graceText(1), '1 second to look around');
+	assert.equal(graceText(-5), '0 seconds to look around');
+});

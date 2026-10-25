@@ -50,6 +50,9 @@ export class ParentState {
 	/** The child chosen in the URL (?child=<id>); empty means the first child. */
 	historyChildParam = $state('');
 
+	/** Minutes a child may keep browsing after the limit is reached; a family setting. */
+	graceMinutes = $state('2');
+
 	url = $state('');
 	addError = $state('');
 	adding = $state(false);
@@ -80,6 +83,8 @@ export class ParentState {
 					windows: windowsToText(c.budget.daily_windows),
 					cutoff: c.budget.cutoff_mid_play
 				};
+			const settings = await api('GET', '/api/parent/settings');
+			this.graceMinutes = String(settings?.grace_minutes ?? 2);
 			this.policies = await api('GET', '/api/parent/policies');
 			this.requests = await api('GET', '/api/parent/requests');
 			const parents = await api('GET', '/api/parent/parents');
@@ -118,6 +123,13 @@ export class ParentState {
 		const body = budgetBody(this.forms[id]);
 		if (!body) throw new Error('Check the budget: numbers, and windows like 07:00-19:00');
 		await api('PUT', `/api/parent/children/${id}/budget`, body);
+		await this.load();
+	};
+	saveGrace = async () => {
+		const n = Number(this.graceMinutes);
+		if (this.graceMinutes.trim() === '' || !Number.isFinite(n) || n < 0 || n > 60)
+			throw new Error('The grace is a number of minutes from 0 to 60');
+		await api('PUT', '/api/parent/settings', { grace_minutes: n });
 		await this.load();
 	};
 	pair = async (id: string) => {

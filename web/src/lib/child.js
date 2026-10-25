@@ -31,6 +31,16 @@ export function badge(remaining, total) {
 	return null;
 }
 
+/** @param {number} s seconds of grace left */
+export function graceText(s) {
+	const n = Math.max(0, Math.ceil(s));
+	if (n > 60) {
+		const m = Math.ceil(n / 60);
+		return `${m} minute${m === 1 ? '' : 's'} to look around`;
+	}
+	return `${n} second${n === 1 ? '' : 's'} to look around`;
+}
+
 /**
  * @param {string} reason
  * @param {number | null | undefined} nextStart unix seconds

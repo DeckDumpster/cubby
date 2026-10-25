@@ -162,6 +162,89 @@ fn usage(conn: &Connection, child: &str, tz: &str, now: i64) -> rusqlite::Result
     )
 }
 
+/// The family's browse grace after a limit is reached, in seconds.
+pub(crate) fn grace_s(conn: &Connection) -> rusqlite::Result<i64> {
+    let v: Option<String> = conn
+        .query_row(
+            "SELECT value FROM family_settings WHERE key='grace_s'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(v.and_then(|v| v.parse::<i64>().ok())
+        .filter(|g| *g >= 0)
+        .unwrap_or(budget::DEFAULT_GRACE_S))
+}
+
+pub(crate) fn set_grace_s(conn: &Connection, secs: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO family_settings(key,value) VALUES('grace_s',?1)
+         ON CONFLICT(key) DO UPDATE SET value=?1",
+        [secs.to_string()],
+    )?;
+    Ok(())
+}
+
+/// What the child may do at `now`. The first sighting of a spent budget is kept as the start of
+/// the grace, so a reload or another device of the same child sees the same countdown; a new day
+/// or a later parent grant starts it afresh.
+pub(crate) fn access_for(
+    conn: &Connection,
+    child: &str,
+    now: i64,
+) -> rusqlite::Result<budget::Access> {
+    let b = load_budget(conn, child, now)?;
+    let tz = child_tz(conn, child)?;
+    let u = usage(conn, child, &tz, now)?;
+    let Some(candidate) = budget::limit_reached_at(&b, u, &tz, now) else {
+        conn.execute("DELETE FROM limit_reached WHERE child_id=?1", [child])?;
+        return Ok(budget::Access::Open);
+    };
+    let stored: Option<i64> = conn
+        .query_row(
+            "SELECT reached_at FROM limit_reached WHERE child_id=?1",
+            [child],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let regranted = |t: i64| -> rusqlite::Result<bool> {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM budget_grants WHERE child_id=?1 AND granted_at>=?2)",
+            params![child, t],
+            |r| r.get(0),
+        )
+    };
+    let at = match stored {
+        Some(t) if t >= budget::day_start(&tz, now) && t <= now && !regranted(t)? => t,
+        _ => {
+            conn.execute(
+                "INSERT INTO limit_reached(child_id,reached_at) VALUES(?1,?2)
+                 ON CONFLICT(child_id) DO UPDATE SET reached_at=?2",
+                params![child, candidate],
+            )?;
+            candidate
+        }
+    };
+    Ok(budget::access(Some(at), grace_s(conn)?, now))
+}
+
+pub(crate) fn limit_json(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Value> {
+    let a = access_for(conn, child, now)?;
+    let tz = child_tz(conn, child)?;
+    Ok(access_json(a, &tz, now))
+}
+
+pub(crate) fn access_json(a: budget::Access, tz: &str, now: i64) -> Value {
+    let (state, ends) = match a {
+        budget::Access::Open => ("open", None),
+        budget::Access::Grace { ends_at } => ("grace", Some(ends_at)),
+        budget::Access::Locked => ("locked", None),
+    };
+    json!({"state": state, "grace_ends_at": ends,
+        "grace_left_s": ends.map(|e| (e - now).max(0)),
+        "resets_at": budget::next_midnight(tz, now)})
+}
+
 /// Closes every grant that has gone [`budget::BEAT_TIMEOUT_S`] without a beat. The charge was
 /// kept current by the beats, so closing only stamps the end.
 pub fn reap_stale(conn: &Connection, now: i64) -> rusqlite::Result<usize> {
@@ -179,6 +262,7 @@ pub fn play(
     now: i64,
 ) -> Result<PlayOutcome, PlayError> {
     reap_stale(conn, now)?;
+    access_for(conn, &dev.child_id, now)?;
     let duration: Option<f64> = conn
         .query_row(
             "SELECT v.duration_s FROM playable p JOIN videos v USING(youtube_id)
@@ -292,6 +376,7 @@ pub fn beat(
     let b = load_budget(conn, &dev.child_id, now)?;
     let tz = child_tz(conn, &dev.child_id)?;
     let u = usage(conn, &dev.child_id, &tz, now)?;
+    access_for(conn, &dev.child_id, now)?;
     Ok(BeatOutcome {
         remaining: budget::remaining(&b, u),
         stop: budget::cutoff(&b, u, &tz, now),
@@ -476,7 +561,8 @@ async fn play_route(
             remaining,
         } => json!({"grant_id": grant_id, "remaining": remaining_json(remaining)}),
         PlayOutcome::Refused { reason, next_start } => {
-            json!({"refused": reason, "next_start": next_start})
+            json!({"refused": reason, "next_start": next_start,
+                "limit": limit_json(&conn, &dev.child_id, unix_now()).map_err(ApiError::internal)?})
         }
     }))
 }
@@ -498,7 +584,8 @@ async fn beat_route(
         let l = vec![("child", dev.child_id.clone())];
         push(&state, "cubby_charge", o.charge_delta, "1", l);
     }
-    let mut v = json!({"remaining": remaining_json(o.remaining), "stop": o.stop.is_some()});
+    let mut v = json!({"remaining": remaining_json(o.remaining), "stop": o.stop.is_some(),
+        "limit": limit_json(&conn, &dev.child_id, unix_now()).map_err(ApiError::internal)?});
     if let Some(grace) = o.stop {
         v["grace_s"] = json!(grace);
     }
@@ -553,6 +640,121 @@ mod tests {
             params![ve, cutoff, windows],
         )
         .unwrap();
+    }
+
+    use budget::Access;
+
+    /// One video of budget, spent by watching it through from `T0`; the limit is reached at T0+600.
+    fn spent_at_t0_plus_600() -> Connection {
+        let c = db();
+        budget_row(&c, 1.0, 0, "");
+        let id = grant(&c, "v1", T0);
+        watch(&c, &id, T0, 600);
+        c
+    }
+
+    #[test]
+    fn reaching_the_limit_starts_a_two_minute_grace_that_browse_survives_and_play_does_not() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(
+            access_for(&c, "kid", at).unwrap(),
+            Access::Grace { ends_at: at + 120 }
+        );
+        // The grace counts from reaching the limit, not from the next look.
+        assert_eq!(
+            access_for(&c, "kid", at + 100).unwrap(),
+            Access::Grace { ends_at: at + 120 }
+        );
+        assert!(matches!(
+            play(&c, &dev(), "v2", at + 100).unwrap(),
+            PlayOutcome::Refused {
+                reason: "out-of-videos",
+                ..
+            }
+        ));
+        assert_eq!(access_for(&c, "kid", at + 120).unwrap(), Access::Locked);
+        assert_eq!(
+            access_for(&c, "kid", at + 3 * 3600).unwrap(),
+            Access::Locked
+        );
+    }
+
+    #[test]
+    fn the_grace_length_is_a_family_setting() {
+        let c = spent_at_t0_plus_600();
+        assert_eq!(grace_s(&c).unwrap(), 120);
+        set_grace_s(&c, 300).unwrap();
+        let at = T0 + 600;
+        assert_eq!(
+            access_for(&c, "kid", at + 200).unwrap(),
+            Access::Grace { ends_at: at + 300 }
+        );
+        set_grace_s(&c, 0).unwrap();
+        assert_eq!(access_for(&c, "kid", at + 1).unwrap(), Access::Locked);
+    }
+
+    #[test]
+    fn a_parent_grant_lifts_the_lock_at_once_and_a_later_limit_gets_a_fresh_grace() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(access_for(&c, "kid", at + 500).unwrap(), Access::Locked);
+        grant_extra(&c, "kid", 1.0, 0.0, "parent", None, at + 500).unwrap();
+        assert_eq!(access_for(&c, "kid", at + 501).unwrap(), Access::Open);
+        let id = grant(&c, "v2", at + 510);
+        watch(&c, &id, at + 510, 600);
+        let again = at + 1110;
+        assert_eq!(
+            access_for(&c, "kid", again).unwrap(),
+            Access::Grace {
+                ends_at: again + 120
+            }
+        );
+    }
+
+    #[test]
+    fn a_grant_given_before_anyone_looked_still_beats_the_old_lock() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(
+            access_for(&c, "kid", at).unwrap(),
+            Access::Grace { ends_at: at + 120 }
+        );
+        grant_extra(&c, "kid", 1.0, 0.0, "parent", None, at + 10).unwrap();
+        let id = grant(&c, "v2", at + 20);
+        watch(&c, &id, at + 20, 600);
+        // Spent again with no read in between: the stored time predates the grant.
+        let later = at + 620;
+        assert_eq!(
+            access_for(&c, "kid", later).unwrap(),
+            Access::Grace {
+                ends_at: later + 120
+            }
+        );
+    }
+
+    #[test]
+    fn the_midnight_reset_lifts_the_lock() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(access_for(&c, "kid", at + 3600).unwrap(), Access::Locked);
+        let midnight = budget::next_midnight("UTC", at);
+        assert_eq!(access_for(&c, "kid", midnight).unwrap(), Access::Open);
+    }
+
+    #[test]
+    fn a_closed_viewing_window_starts_the_grace_when_it_closed() {
+        let c = db();
+        budget_row(&c, 5.0, 0, r#"[["07:00","12:05"]]"#);
+        assert_eq!(access_for(&c, "kid", T0 + 60).unwrap(), Access::Open);
+        let closed = T0 + 5 * 60;
+        assert_eq!(
+            access_for(&c, "kid", closed + 60).unwrap(),
+            Access::Grace {
+                ends_at: closed + 120
+            }
+        );
+        assert_eq!(access_for(&c, "kid", closed + 121).unwrap(), Access::Locked);
     }
 
     #[test]

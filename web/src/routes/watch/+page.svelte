@@ -11,6 +11,7 @@
 		SEEK_JUMP_S,
 		clock,
 	endReason,
+		graceText,
 		loadYT,
 		localUrl,
 		offList,
@@ -79,6 +80,36 @@
 	let lastBeat = 0;
 	let timer: ReturnType<typeof setInterval> | undefined;
 
+	// The limit state the server reports: grace counts down from the server's seconds, so a clock
+	// skew on this device cannot lengthen it; locked is the whole-site "All done for today".
+	let locked = $state(false);
+	let graceEnd = $state<number | null>(null);
+	let graceLeft = $state(0);
+	let graceTick: ReturnType<typeof setInterval> | undefined;
+
+	function takeLimit(limit: any) {
+		clearInterval(graceTick);
+		graceTick = undefined;
+		graceEnd = null;
+		if (limit?.state === 'locked') {
+			locked = true;
+			return;
+		}
+		locked = false;
+		if (limit?.state === 'grace') {
+			graceEnd = Date.now() + limit.grace_left_s * 1000;
+			graceLeft = limit.grace_left_s;
+			graceTick = setInterval(() => {
+				graceLeft = Math.max(0, ((graceEnd ?? 0) - Date.now()) / 1000);
+				if (graceLeft <= 0) {
+					clearInterval(graceTick);
+					graceTick = undefined;
+					loadHome();
+				}
+			}, 1000);
+		}
+	}
+
 	const badgeInfo = $derived(badge(remaining, total));
 
 	function thumb(t: Tile) {
@@ -91,12 +122,17 @@
 			token.clear();
 			paired = false;
 		}
+		if (res.status === 403 && (res.data as any)?.error === 'locked') {
+			destroyPlayer();
+			takeLimit((res.data as any).limit);
+		}
 		return res;
 	}
 
 	async function loadHome() {
 		const { status, data } = await guarded(api('/api/child/home'));
 		if (status !== 200) return;
+		takeLimit(data.limit);
 		child = data.child ?? {};
 		remaining = data.remaining ?? remaining;
 		total = data.total_videos ?? total;
@@ -295,7 +331,8 @@
 		const { status, data } = await api(`/api/child/grant/${grantId}/beat`, { body: { position_s: position, state } });
 		if (status !== 200) return;
 		remaining = data.remaining ?? remaining;
-		if (data.stop) await finish('stop', 'stopped');
+		if (data.limit) takeLimit(data.limit);
+		if (data.stop || locked) await finish('stop', 'stopped');
 	}
 
 	async function closeGrant(reason: string) {
@@ -393,6 +430,7 @@
 			return;
 		}
 		if (data.refused) {
+			if (data.limit) takeLimit(data.limit);
 			refusal = refusalMessage(data.refused, data.next_start);
 			view = 'refused';
 			return;
@@ -520,6 +558,11 @@
 			<button class="primary go" type="submit">Go</button>
 			{#if pairError}<p class="error" role="alert">{pairError}</p>{/if}
 		</form>
+	{:else if locked}
+		<div class="card done" data-testid="locked">
+			<h1>All done for today</h1>
+			<p>See you tomorrow!</p>
+		</div>
 	{:else}
 		<header>
 			<span class="brand"><span class="logo">C</span>Cubby</span>
@@ -534,6 +577,10 @@
 		</header>
 
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
+
+		{#if graceEnd !== null}
+			<p class="grace" data-testid="grace" role="status">{graceText(graceLeft)}</p>
+		{/if}
 
 		{#if view === 'grid'}
 			<form class="search" role="search" onsubmit={search}>
@@ -660,6 +707,8 @@
 	h2 { font-size: 1.6rem; margin: var(--space-5) 0 var(--space-3); }
 	h1.now { font-size: 1.5rem; margin: 0 0 var(--space-3); }
 
+	.grace { margin: 0 0 var(--space-3); font-weight: 700; text-align: center; background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-4); }
+	.done { margin: 20vh auto 0; text-align: center; }
 	.badge { display: flex; flex-direction: column; gap: var(--space-1); margin-left: auto; font-weight: 700; background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-4); }
 	.meter { display: block; width: 14rem; max-width: 100%; height: 0.8rem; background: var(--surface-2); border: 1px solid var(--muted); border-radius: 1rem; overflow: hidden; }
 	.fill { display: block; height: 100%; background: var(--ok); }
