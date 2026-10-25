@@ -149,6 +149,11 @@ export function parseSearch(/** @type {any} */ data) {
 	return data?.tiles ?? [];
 }
 
+/** The history payload: `tiles` for this page, `more` when another page follows. */
+export function parseRecent(/** @type {any} */ data) {
+	return { tiles: data?.tiles ?? [], more: !!data?.more };
+}
+
 /** @param {number} s seconds */
 export function clock(s) {
 	const n = Math.max(0, Math.floor(Number.isFinite(s) ? s : 0));

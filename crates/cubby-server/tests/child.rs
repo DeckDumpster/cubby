@@ -71,6 +71,7 @@ async fn child_routes_refuse_an_unauthenticated_call() {
         "/api/child/home",
         "/api/child/search?q=x",
         "/api/child/next?after=a",
+        "/api/child/recent",
     ] {
         assert_eq!(
             get(api(false), p, false).await.0,
@@ -149,4 +150,11 @@ async fn home_and_search_json_match_the_fixtures_the_page_parses() {
     );
     let (_, search) = get(api(false), "/api/child/search?q=blue", true).await;
     assert_eq!(shape(&search), shape(&fixture("child-search.json")));
+}
+
+#[tokio::test]
+async fn recent_pages_the_history_newest_first() {
+    let (_, body) = get(api(false), "/api/child/recent", true).await;
+    assert!(ids(&body["tiles"]).is_empty());
+    assert_eq!(body["more"], false);
 }

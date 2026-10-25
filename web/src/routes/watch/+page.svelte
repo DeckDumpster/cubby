@@ -19,7 +19,8 @@
 		refusalMessage,
 		token,
 		parseHome,
-		parseSearch
+		parseSearch,
+		parseRecent
 	} from '$lib/child.js';
 
 	type Tile = { youtube_id: string; title: string; channel_title?: string; channel_avatar?: string; thumb?: string };
@@ -40,6 +41,12 @@
 	let results = $state<Tile[] | null>(null);
 	let searched = $state('');
 	let error = $state('');
+	// "Recently watched": a one-row preview on home, the full paged list at /watch?recent=1.
+	let recentRow = $state<Tile[]>([]);
+	let recentRowMore = $state(false);
+	let recentAll = $state<Tile[]>([]);
+	let recentMore = $state(false);
+	let recentLoading = $state(false);
 
 	// The watch page: idle | loading | playing | ended | refused | stopped
 	let view = $state<'grid' | 'loading' | 'playing' | 'ended' | 'refused' | 'stopped'>('grid');
@@ -92,6 +99,31 @@
 		remaining = data.remaining ?? remaining;
 		total = data.total_videos ?? total;
 		sections = parseHome(data).sections;
+		loadRecentRow();
+	}
+
+	async function loadRecentRow() {
+		const { status, data } = await guarded(api('/api/child/recent?limit=12'));
+		if (status !== 200) return;
+		const r = parseRecent(data);
+		recentRow = r.tiles;
+		recentRowMore = r.more;
+	}
+
+	async function loadRecentPage(reset: boolean) {
+		if (recentLoading) return;
+		recentLoading = true;
+		if (reset) recentAll = [];
+		const { status, data } = await guarded(api(`/api/child/recent?limit=24&offset=${recentAll.length}`));
+		recentLoading = false;
+		if (status !== 200) return;
+		const r = parseRecent(data);
+		recentAll = [...recentAll, ...r.tiles];
+		recentMore = r.more;
+	}
+
+	function seeAll() {
+		goto('/watch?recent=1', { noScroll: false });
 	}
 
 	onMount(() => {
@@ -141,7 +173,12 @@
 
 	// The URL is the search state: /watch is home, /watch?q=... is a search, so back leaves it.
 	const urlQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
+	const showRecent = $derived(page.url.searchParams.get('recent') === '1' && !urlQuery);
 	let searchSeq = 0;
+
+	$effect(() => {
+		if (showRecent && untrack(() => paired)) untrack(() => loadRecentPage(true));
+	});
 
 	async function runSearch(q: string) {
 		const seq = ++searchSeq;
@@ -504,9 +541,26 @@
 					{#if results.length === 0}<p class="empty">Nothing found.</p>{/if}
 					<div class="grid">{#each results as t (t.youtube_id)}{@render tile(t)}{/each}</div>
 				</section>
+			{:else if showRecent}
+				<div class="searched">
+					<button type="button" class="home" onclick={() => goto('/watch')}>← Home</button>
+					<h2>Recently watched</h2>
+				</div>
+				{#if recentAll.length === 0 && !recentLoading}<p class="empty">Nothing watched yet.</p>{/if}
+				<div class="grid" data-testid="recent-all">{#each recentAll as t (t.youtube_id)}{@render tile(t)}{/each}</div>
+				{#if recentMore}<button class="more" disabled={recentLoading} onclick={() => loadRecentPage(false)}>More</button>{/if}
 			{:else}
-				{#if sections.every((s) => s.tiles.length === 0)}
+				{#if sections.every((s) => s.tiles.length === 0) && recentRow.length === 0}
 					<p class="empty" data-testid="nothing-allowed">Nothing is allowed yet. Ask a grown-up to add some videos.</p>
+				{/if}
+				{#if recentRow.length}
+					<section data-testid="recent-row">
+						<div class="searched">
+							<h2>Recently watched</h2>
+							<button class="seeall" onclick={seeAll}>See all</button>
+						</div>
+						<div class="rail">{#each recentRow as t (t.youtube_id)}{@render tile(t)}{/each}</div>
+					</section>
 				{/if}
 				{#each sections as s (s.key)}
 					{#if s.tiles.length}
@@ -607,6 +661,9 @@
 	input::placeholder { color: var(--muted); opacity: 1; }
 
 	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-4); }
+	.rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; column-gap: var(--space-4); row-gap: 0; }
+	.rail > :global(*) { min-width: 0; }
+	.seeall { margin-left: auto; }
 	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; min-height: 0; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
 	.thumb { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--surface-2); }
 	.meta { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3); }

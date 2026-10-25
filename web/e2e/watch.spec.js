@@ -50,7 +50,7 @@ const FAKE_PLAYER = () => {
 	window.__state = (s) => window.__players.at(-1).opts.events.onStateChange({ data: s });
 };
 
-async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } } } = {}) {
+async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [] } = {}) {
 	const calls = [];
 	await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
 	await page.addInitScript(FAKE_PLAYER);
@@ -60,6 +60,12 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		calls.push({ path, body: req.postDataJSON?.() ?? null });
 		const json = (data) => route.fulfill({ json: data });
 		if (path.endsWith('/home')) return json(HOME);
+		if (path.endsWith('/recent')) {
+			const q = new URL(req.url()).searchParams;
+			const limit = Number(q.get('limit') ?? 24);
+			const off = Number(q.get('offset') ?? 0);
+			return json({ tiles: recent.slice(off, off + limit), more: recent.length > off + limit });
+		}
 		if (path.endsWith('/play')) return json(play);
 		if (path.endsWith('/beat')) return json({ remaining: { videos: 2, minutes: null }, stop: false });
 		if (path.endsWith('/end')) return json({ ok: true });
@@ -430,5 +436,34 @@ for (const [name, width, height] of SIZES) {
 		await expect(page.getByTestId('fsbox')).toHaveAttribute('data-fs', 'fill');
 		const st = await page.locator('.stage').boundingBox();
 		expect(st.width).toBeGreaterThan(width - 40);
+	});
+}
+
+const HISTORY = Array.from({ length: 30 }, (_, i) => tile(`h${i}`, `Watched ${i}`));
+
+for (const [name, size] of [['ipad', { width: 820, height: 1180 }], ['phone', { width: 390, height: 844 }]]) {
+	test(`recently watched: one row with See all, then the full list (${name})`, async ({ page }) => {
+		await page.setViewportSize(size);
+		await setup(page, { recent: HISTORY });
+		await page.goto('/watch');
+		const row = page.getByTestId('recent-row');
+		await expect(row).toBeVisible();
+		const tops = await row.locator('.tile').evaluateAll((els) => {
+			const rail = els[0].parentElement.getBoundingClientRect();
+			return els.filter((e) => e.getBoundingClientRect().top < rail.bottom - 1).map((e) => Math.round(e.getBoundingClientRect().top));
+		});
+		expect(tops.length).toBeGreaterThan(0);
+		expect(new Set(tops).size).toBe(1);
+		await page.screenshot({ path: `../docs/screenshots/recent/row-${name}.png` });
+
+		await row.getByRole('button', { name: 'See all' }).click();
+		await expect(page).toHaveURL(/recent=1/);
+		await expect(page.getByTestId('recent-all').locator('.tile')).toHaveCount(24);
+		await page.getByRole('button', { name: 'More' }).click();
+		await expect(page.getByTestId('recent-all').locator('.tile')).toHaveCount(30);
+		await page.screenshot({ path: `../docs/screenshots/recent/all-${name}.png` });
+
+		await page.getByRole('button', { name: /Home/ }).click();
+		await expect(page.getByTestId('recent-row')).toBeVisible();
 	});
 }

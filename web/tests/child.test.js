@@ -73,7 +73,7 @@ test('loadYT resolves at once when the API is already there', async () => {
 });
 
 import { readFileSync } from 'node:fs';
-import { parseHome, parseSearch } from '../src/lib/child.js';
+import { parseHome, parseRecent, parseSearch } from '../src/lib/child.js';
 const fixture = (/** @type {string} */ n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}`, import.meta.url), 'utf8'));
 
 test('the page reads the server home payload: sections carry titled tiles', () => {
@@ -84,4 +84,9 @@ test('the page reads the server home payload: sections carry titled tiles', () =
 
 test('the page reads the server search payload as tiles', () => {
 	assert.equal(parseSearch(fixture('child-search.json'))[0].youtube_id, 'a');
+});
+
+test('parseRecent reads tiles and the more flag, and survives a bad payload', () => {
+	assert.deepEqual(parseRecent({ tiles: [{ youtube_id: 'a' }], more: true }), { tiles: [{ youtube_id: 'a' }], more: true });
+	assert.deepEqual(parseRecent(null), { tiles: [], more: false });
 });
