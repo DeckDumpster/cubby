@@ -24,7 +24,6 @@ pub const DEFAULT_VE_MINUTES: f64 = 15.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Budget {
     pub video_equivalents: Option<f64>,
-    pub window_s: i64,
     pub minutes_cap: Option<f64>,
     /// Minutes of watching that cost one video equivalent.
     pub ve_minutes: f64,
@@ -33,7 +32,7 @@ pub struct Budget {
     pub daily_windows: Vec<(u32, u32)>,
 }
 
-/// Totals over the grants inside the budget window.
+/// Totals over the grants of the child's current local calendar day.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Usage {
     pub charge: f64,
@@ -140,6 +139,35 @@ pub fn cutoff(b: &Budget, u: Usage, tz: &str, now: i64) -> Option<u32> {
     spent.then_some(CUTOFF_GRACE_S)
 }
 
+/// The unix time of the most recent local midnight at or before `now` in `tz`. A zone or instant
+/// we cannot read falls back to UTC midnight rather than opening the budget.
+pub fn day_start(tz: &str, now: i64) -> i64 {
+    local_midnight(tz, now, 0).unwrap_or(now.div_euclid(86_400) * 86_400)
+}
+
+/// The unix time of the next local midnight after `now` in `tz`; 23 h and 25 h days included.
+pub fn next_midnight(tz: &str, now: i64) -> i64 {
+    local_midnight(tz, now, 1).unwrap_or(now.div_euclid(86_400) * 86_400 + 86_400)
+}
+
+fn local_midnight(tz: &str, now: i64, days: i64) -> Option<i64> {
+    let ts = jiff::Timestamp::from_second(now).ok()?;
+    let zone = jiff::tz::TimeZone::get(tz).ok()?;
+    let date = ts
+        .to_zoned(zone.clone())
+        .date()
+        .checked_add(jiff::Span::new().days(days))
+        .ok()?;
+    // `to_zoned` on a midnight skipped by a DST jump lands on the first instant after it.
+    Some(
+        date.at(0, 0, 0, 0)
+            .to_zoned(zone)
+            .ok()?
+            .timestamp()
+            .as_second(),
+    )
+}
+
 /// `None` when `now` is inside a window (or there are none); else when the next one opens.
 pub fn next_window_start(windows: &[(u32, u32)], tz: &str, now: i64) -> Option<i64> {
     use jiff::{Span, Timestamp};
@@ -237,7 +265,6 @@ mod tests {
     fn budget() -> Budget {
         Budget {
             video_equivalents: Some(3.0),
-            window_s: 86_400,
             minutes_cap: Some(60.0),
             ve_minutes: DEFAULT_VE_MINUTES,
             cutoff_mid_play: false,
@@ -461,6 +488,33 @@ mod tests {
             next_window_start(&w, "America/Los_Angeles", at),
             Some(1_772_978_400)
         );
+    }
+
+    const LA: &str = "America/Los_Angeles";
+
+    #[test]
+    fn grants_at_2350_and_0010_local_fall_in_different_days() {
+        // 2026-10-14 23:50 PDT = 2026-10-15 06:50 UTC.
+        let before = 1_791_979_200 + 18 * 3600 + 50 * 60;
+        let after = before + 20 * 60;
+        assert_ne!(day_start(LA, before), day_start(LA, after));
+        assert_eq!(
+            day_start(LA, after),
+            before - 23 * 3600 - 50 * 60 + 24 * 3600
+        );
+        assert_eq!(next_midnight(LA, before), day_start(LA, after));
+    }
+
+    #[test]
+    fn midnight_is_the_reset_on_dst_days() {
+        // Spring forward 2026-03-08 is a 23 h day: 08:00 UTC to 07:00 UTC.
+        let at = 1_772_956_800 + 12 * 3600;
+        assert_eq!(day_start(LA, at), 1_772_956_800);
+        assert_eq!(next_midnight(LA, at), 1_773_039_600);
+        // Fall back 2026-11-01 is a 25 h day: 07:00 UTC to 08:00 UTC the next day.
+        let at = 1_793_516_400 + 12 * 3600;
+        assert_eq!(day_start(LA, at), 1_793_516_400);
+        assert_eq!(next_midnight(LA, at), 1_793_606_400);
     }
 
     #[test]

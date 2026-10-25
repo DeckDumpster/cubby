@@ -361,7 +361,7 @@ async fn a_paired_device_plays_beats_and_ends_over_http() {
         "INSERT INTO videos(youtube_id,title,duration_s) VALUES ('v1','one',600);
          INSERT INTO allow_policies(id,kind,youtube_id,added_at) VALUES ('p','video','v1',0);
          INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES ('v1',NULL,'p','approved',0);
-         INSERT INTO budgets(child_id,video_equivalents,window_s,cutoff_mid_play) VALUES ('c1',1,86400,0);",
+         INSERT INTO budgets(child_id,video_equivalents,cutoff_mid_play) VALUES ('c1',1,0);",
     )
     .unwrap();
     let code = ident::new_pairing_code(&conn, "c1", now())
@@ -564,7 +564,7 @@ async fn a_paired_device_browses_home_search_and_next_over_http() {
         "INSERT INTO videos(youtube_id,title,duration_s) VALUES ('v1','Blue train',600),('v2','Red train',300),('v3','Hidden train',300);
          INSERT INTO allow_policies(id,kind,youtube_id,added_at) VALUES ('p1','video','v1',0),('p2','video','v2',0);
          INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES ('v1',NULL,'p1','approved',0),('v2',NULL,'p2','approved',0);
-         INSERT INTO budgets(child_id,video_equivalents,window_s,cutoff_mid_play) VALUES ('c1',2,86400,0);",
+         INSERT INTO budgets(child_id,video_equivalents,cutoff_mid_play) VALUES ('c1',2,0);",
     )
     .unwrap();
     let code = ident::new_pairing_code(&conn, "c1", now())

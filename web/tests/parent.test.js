@@ -25,7 +25,6 @@ test('a budget form becomes the API body, blanks becoming no limit', () => {
 		budgetBody({ videos: '3', minutes: '', windows: '07:00-19:00', cutoff: true }),
 		{
 			video_equivalents: 3,
-			window_s: 86400,
 			minutes_cap: null,
 			ve_minutes: null,
 			cutoff_mid_play: true,

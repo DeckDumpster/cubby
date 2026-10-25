@@ -37,7 +37,6 @@ pub struct AutoItem {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Budget {
     pub video_equivalents: Option<f64>,
-    pub window_s: Option<i64>,
     pub minutes_cap: Option<i64>,
     /// Minutes of watching per video equivalent; `None` is the default.
     pub ve_minutes: Option<f64>,
@@ -763,17 +762,16 @@ pub fn resolve_request(
 pub fn get_budget(conn: &Connection, child: &str) -> Result<Budget> {
     Ok(conn
         .query_row(
-            "SELECT video_equivalents, window_s, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes
+            "SELECT video_equivalents, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes
              FROM budgets WHERE child_id=?1",
             [child],
             |r| {
                 Ok(Budget {
                     video_equivalents: r.get(0)?,
-                    window_s: r.get(1)?,
-                    minutes_cap: r.get(2)?,
-                    cutoff_mid_play: r.get::<_, i64>(3)? != 0,
-                    daily_windows: r.get(4)?,
-                    ve_minutes: r.get(5)?,
+                    minutes_cap: r.get(1)?,
+                    cutoff_mid_play: r.get::<_, i64>(2)? != 0,
+                    daily_windows: r.get(3)?,
+                    ve_minutes: r.get(4)?,
                 })
             },
         )
@@ -783,14 +781,13 @@ pub fn get_budget(conn: &Connection, child: &str) -> Result<Budget> {
 
 pub fn put_budget(conn: &Connection, child: &str, b: &Budget) -> Result<()> {
     conn.execute(
-        "INSERT INTO budgets(child_id, video_equivalents, window_s, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)
-         ON CONFLICT(child_id) DO UPDATE SET video_equivalents=?2, window_s=?3, minutes_cap=?4,
-            cutoff_mid_play=?5, daily_windows=?6, ve_minutes=?7",
+        "INSERT INTO budgets(child_id, video_equivalents, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes)
+         VALUES (?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(child_id) DO UPDATE SET video_equivalents=?2, minutes_cap=?3,
+            cutoff_mid_play=?4, daily_windows=?5, ve_minutes=?6",
         params![
             child,
             b.video_equivalents,
-            b.window_s,
             b.minutes_cap,
             b.cutoff_mid_play as i64,
             b.daily_windows,
@@ -1075,7 +1072,6 @@ mod tests {
         assert_eq!(get_budget(&c, "a").unwrap(), Budget::default());
         let b = Budget {
             video_equivalents: Some(3.0),
-            window_s: Some(86_400),
             minutes_cap: Some(60),
             ve_minutes: Some(10.0),
             cutoff_mid_play: true,

@@ -114,7 +114,7 @@ async fn children(
             .collect();
         out.push(json!({
             "id": k.id, "name": k.name, "avatar": k.avatar, "tz": k.tz,
-            "budget": {"video_equivalents": b.video_equivalents, "window_s": b.window_s,
+            "budget": {"video_equivalents": b.video_equivalents,
                 "minutes_cap": b.minutes_cap,
                 "ve_minutes": b.ve_minutes.unwrap_or(DEFAULT_VE_MINUTES), "cutoff_mid_play": b.cutoff_mid_play,
                 "daily_windows": windows},
@@ -164,7 +164,6 @@ async fn edit_child(
 #[derive(Deserialize)]
 struct BudgetBody {
     video_equivalents: Option<f64>,
-    window_s: Option<i64>,
     minutes_cap: Option<i64>,
     #[serde(default)]
     ve_minutes: Option<f64>,
@@ -183,7 +182,6 @@ async fn set_budget(
     if b.video_equivalents
         .is_some_and(|v| !v.is_finite() || v < 0.0)
         || b.minutes_cap.is_some_and(|m| m < 0)
-        || b.window_s.is_some_and(|w| w <= 0)
         || b.ve_minutes.is_some_and(|m| !m.is_finite() || m <= 0.0)
     {
         return Err(bad("budget numbers must be positive"));
@@ -206,7 +204,6 @@ async fn set_budget(
         &id,
         &Budget {
             video_equivalents: b.video_equivalents,
-            window_s: b.window_s,
             minutes_cap: b.minutes_cap,
             ve_minutes: b.ve_minutes,
             cutoff_mid_play: b.cutoff_mid_play,
