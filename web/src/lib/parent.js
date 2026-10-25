@@ -153,12 +153,32 @@ export function dayGroups(grants, tz, now) {
 }
 
 /**
- * "trailer, compilation" to ["trailer", "compilation"]: split on commas, trimmed, blanks dropped.
+ * One typed title phrase: trimmed, one surrounding quote pair removed, empty when nothing is left.
+ * The server normalises the same way; this keeps the chips honest about what is stored.
+ * @param {string} text
+ * @returns {string}
+ */
+export function phraseFromText(text) {
+	let t = text.trim();
+	for (const [open, close] of [['"', '"'], ['\u201c', '\u201d'], ["'", "'"]]) {
+		if (t.length >= 2 && t.startsWith(open) && t.endsWith(close)) {
+			t = t.slice(1, -1).trim();
+			break;
+		}
+	}
+	return t;
+}
+
+/**
+ * Adds a typed phrase to a list: no empties, no repeats (ignoring case).
+ * @param {string[]} list
  * @param {string} text
  * @returns {string[]}
  */
-export function wordsFromText(text) {
-	return text.split(',').map((w) => w.trim()).filter(Boolean);
+export function withPhrase(list, text) {
+	const p = phraseFromText(text);
+	if (!p || list.some((x) => x.toLowerCase() === p.toLowerCase())) return list;
+	return [...list, p];
 }
 
 /**
@@ -174,7 +194,7 @@ export function minutesFromText(text) {
 
 /**
  * The form's fields as the rules request body; null when a minutes field does not parse.
- * @param {{ exclude_shorts: boolean, min: string, max: string, has: string, lacks: string }} f
+ * @param {{ exclude_shorts: boolean, min: string, max: string, has: string[], lacks: string[] }} f
  */
 export function rulesBody(f) {
 	const min_minutes = minutesFromText(f.min);
@@ -185,7 +205,7 @@ export function rulesBody(f) {
 		exclude_shorts: f.exclude_shorts,
 		min_minutes,
 		max_minutes,
-		title_has: wordsFromText(f.has),
-		title_lacks: wordsFromText(f.lacks)
+		title_has: f.has,
+		title_lacks: f.lacks
 	};
 }

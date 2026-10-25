@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { windowsFromText, windowsToText, fmtWatched, budgetBody, requestLabel, rulesBody, wordsFromText } from '../src/lib/parent.js';
+import { windowsFromText, windowsToText, fmtWatched, budgetBody, requestLabel, rulesBody, phraseFromText, withPhrase } from '../src/lib/parent.js';
 
 test('windows text round-trips', () => {
 	const w = windowsFromText('07:00-12:00, 14:00-19:30');
@@ -52,7 +52,7 @@ test('the minutes per video equivalent ride the budget body; zero and junk are r
 	assert.equal(budgetBody({ ...f, veMinutes: 'x' }), null);
 });
 
-const rf = { exclude_shorts: true, min: '', max: '30', has: '', lacks: 'compilation, , Mix ' };
+const rf = { exclude_shorts: true, min: '', max: '30', has: [], lacks: ['compilation', 'how to, really'] };
 
 test('rulesBody turns the form into the request body', () => {
 	assert.deepEqual(rulesBody(rf), {
@@ -60,7 +60,7 @@ test('rulesBody turns the form into the request body', () => {
 		min_minutes: null,
 		max_minutes: 30,
 		title_has: [],
-		title_lacks: ['compilation', 'Mix']
+		title_lacks: ['compilation', 'how to, really']
 	});
 });
 
@@ -69,6 +69,16 @@ test('rulesBody refuses a bad or inverted range', () => {
 	assert.equal(rulesBody({ ...rf, min: '40' }), null);
 });
 
-test('wordsFromText splits on commas', () => {
-	assert.deepEqual(wordsFromText(' a,b ,, '), ['a', 'b']);
+test('a quoted phrase is the same phrase as the bare one, and commas stay inside it', () => {
+	assert.equal(phraseFromText('"how to"'), 'how to');
+	assert.equal(phraseFromText('  how to '), 'how to');
+	assert.equal(phraseFromText('\u201chow to\u201d'), 'how to');
+	assert.equal(phraseFromText('a, b'), 'a, b');
+	assert.equal(phraseFromText('""'), '');
+});
+
+test('withPhrase rejects empties and repeats ignoring case', () => {
+	assert.deepEqual(withPhrase([], '"How To"'), ['How To']);
+	assert.deepEqual(withPhrase(['How To'], 'how to'), ['How To']);
+	assert.deepEqual(withPhrase(['a'], '  '), ['a']);
 });
