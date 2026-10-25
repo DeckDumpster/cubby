@@ -824,3 +824,50 @@ async fn channel_rules_allow_only_the_episode_count_live_and_judge_new_uploads()
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn an_extra_grant_raises_the_limits_and_is_listed_with_who_gave_it() {
+    let e = env().await;
+    let (child, _tok) = e.child_with_device().await;
+    e.parent(
+        "PUT",
+        &format!("/api/parent/children/{child}/budget"),
+        Some(json!({"video_equivalents": 3.0, "minutes_cap": 60})),
+    )
+    .await;
+    let path = format!("/api/parent/children/{child}/extra");
+    let (s, _) = e.parent("POST", &path, Some(json!({"minutes": 15}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = e
+        .parent("POST", &path, Some(json!({"videos": 1, "note": "chores"})))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (_, p) = e.parent("GET", "/api/parent/progress", None).await;
+    let k = &p[0];
+    assert_eq!(k["videos"]["limit"], 4.0);
+    assert_eq!(k["minutes"]["limit"], 75.0);
+    assert_eq!(k["grants"].as_array().unwrap().len(), 2);
+    assert_eq!(k["grants"][0]["note"], "chores");
+    assert_eq!(k["grants"][0]["by"], PARENT);
+    assert!(k["grants"][0]["expires_at"].as_i64().unwrap() > now());
+}
+
+#[tokio::test]
+async fn an_empty_or_absurd_extra_grant_is_refused() {
+    let e = env().await;
+    let (child, _tok) = e.child_with_device().await;
+    let path = format!("/api/parent/children/{child}/extra");
+    for body in [json!({}), json!({"minutes": -5}), json!({"videos": 5000})] {
+        let (s, _) = e.parent("POST", &path, Some(body)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+    let (s, _) = e
+        .parent(
+            "POST",
+            "/api/parent/children/nobody/extra",
+            Some(json!({"videos": 1})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}

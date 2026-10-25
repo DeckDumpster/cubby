@@ -12,6 +12,7 @@
 		resets_at: number | null;
 		window: { restricted: boolean; open: boolean; opens_at: number | null; closes_at: number | null };
 		watching: { title: string; minutes: number } | null;
+		grants: { id: string; at: number; expires_at: number; minutes: number; videos: number; by: string; note: string | null }[];
 	};
 
 	const ps = getParent();
@@ -36,6 +37,20 @@
 			document.removeEventListener('visibilitychange', vis);
 		};
 	});
+
+	let custom: Record<string, { minutes: string; videos: string }> = $state({});
+	let failed = $state('');
+	const grant = async (id: string, minutes: number, videos: number) => {
+		failed = '';
+		if (!(minutes > 0 || videos > 0)) return;
+		try {
+			await api('POST', `/api/parent/children/${id}/extra`, { minutes, videos });
+			if (custom[id]) custom[id] = { minutes: '', videos: '' };
+			await load();
+		} catch {
+			failed = 'Could not add the extra time. Try again.';
+		}
+	};
 
 	const num = (n: number) => String(Math.round(n * 10) / 10);
 	const fmt = (label: string, n: number) => (label === 'Videos' ? n.toFixed(2) : num(n));
@@ -89,6 +104,27 @@
 						{/if}
 					</div>
 				{/each}
+				<div class="extra" role="group" aria-label="Give {c?.name ?? 'child'} extra for today">
+					<button type="button" onclick={() => grant(r.child_id, 15, 0)}>+15 min</button>
+					<button type="button" onclick={() => grant(r.child_id, 0, 1)}>+1 video</button>
+				</div>
+				<form class="extra" onsubmit={(ev) => { ev.preventDefault(); const f = custom[r.child_id]; grant(r.child_id, Number(f?.minutes) || 0, Number(f?.videos) || 0); }}>
+					<input type="number" min="0" step="1" inputmode="numeric" placeholder="min" aria-label="Extra minutes" value={custom[r.child_id]?.minutes ?? ''} oninput={(ev) => (custom[r.child_id] = { ...custom[r.child_id], videos: custom[r.child_id]?.videos ?? '', minutes: ev.currentTarget.value })} />
+					<input type="number" min="0" step="0.5" inputmode="decimal" placeholder="videos" aria-label="Extra videos" value={custom[r.child_id]?.videos ?? ''} oninput={(ev) => (custom[r.child_id] = { ...custom[r.child_id], minutes: custom[r.child_id]?.minutes ?? '', videos: ev.currentTarget.value })} />
+					<button type="submit">Add</button>
+				</form>
+				<small>Extra lasts until midnight. It does not open a closed viewing window.</small>
+				{#if failed}<p class="state" role="alert">{failed}</p>{/if}
+				{#if r.grants?.length}
+					<ul class="grants" aria-label="Extra given today">
+						{#each r.grants as g (g.id)}
+							<li>
+								+{[g.minutes ? `${num(g.minutes)} min` : '', g.videos ? `${num(g.videos)} video${g.videos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')}
+								<small>· {g.by} · {when(g.at, r.tz)}{#if g.note} · {g.note}{/if}</small>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 				{#if r.resets_at && (r.videos.limit !== null || r.minutes.limit !== null)}
 					<p class="muted">Resets at midnight</p>
 				{/if}
@@ -111,5 +147,10 @@
 	.bar { height: 0.7rem; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: var(--space-1) 0; }
 	.bar span { display: block; height: 100%; background: var(--accent); }
 	.bar span.full { background: var(--danger); }
+	.extra { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
+	.extra button, .extra input { min-height: 2.75rem; font: inherit; }
+	.extra button { flex: 1 1 6rem; }
+	.extra input { flex: 1 1 4rem; min-width: 0; width: 4rem; }
+	.grants { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
 	small { color: var(--muted); }
 </style>

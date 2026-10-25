@@ -224,6 +224,15 @@ pub fn current_window_end(windows: &[(u32, u32)], tz: &str, now: i64) -> Option<
         .map(|&(_, e)| now + i64::from(e) * 60 - secs)
 }
 
+/// Adds today's granted extras to the limits. An unlimited limit stays unlimited.
+pub fn with_extra(b: &Budget, videos: f64, minutes: f64) -> Budget {
+    Budget {
+        video_equivalents: b.video_equivalents.map(|v| v + videos),
+        minutes_cap: b.minutes_cap.map(|m| m + minutes),
+        ..b.clone()
+    }
+}
+
 /// Parses `[["07:00","19:00"]]`-style pairs as the budgets column stores them.
 pub fn parse_windows(pairs: &[(String, String)]) -> Option<Vec<(u32, u32)>> {
     fn hm(s: &str) -> Option<u32> {
@@ -283,6 +292,20 @@ mod tests {
             Some(NOON_UTC + 7 * 3600)
         );
         assert_eq!(current_window_end(&w, "UTC", NOON_UTC + 8 * 3600), None);
+    }
+
+    #[test]
+    fn extras_raise_limits_but_not_unlimited_ones() {
+        let b = with_extra(&budget(), 1.0, 15.0);
+        assert_eq!(
+            (b.video_equivalents, b.minutes_cap),
+            (Some(4.0), Some(75.0))
+        );
+        let open = Budget {
+            video_equivalents: None,
+            ..budget()
+        };
+        assert_eq!(with_extra(&open, 1.0, 0.0).video_equivalents, None);
     }
 
     #[test]
