@@ -177,7 +177,7 @@
 	let searchSeq = 0;
 
 	$effect(() => {
-		if (showRecent && untrack(() => paired)) loadRecentPage(true);
+		if (showRecent && untrack(() => paired)) untrack(() => loadRecentPage(true));
 	});
 
 	async function runSearch(q: string) {
