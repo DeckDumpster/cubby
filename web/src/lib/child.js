@@ -232,9 +232,10 @@ export function moreAfterThis(videos, durationS, veMinutes) {
 /**
  * The start-of-video notice. `n` is `moreAfterThis`: a whole count, 0.5 for "a little more
  * time" (less than a video left), 0 for the budget used up exactly, negative when it runs out mid-video.
- * @param {number} n
+ * @param {number | null} n
  */
 export function startNotice(n) {
+	if (n == null) return '';
 	if (n < 0) return 'This is the last video. Videos stop partway through this one.';
 	if (n === 0) return 'This is the last video.';
 	if (n < 1) return 'You have a little more time after this one.';
