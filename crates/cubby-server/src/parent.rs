@@ -27,9 +27,14 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/parent/parents", get(parents))
         .route("/api/parent/children", get(children).post(add_child))
         .route("/api/parent/progress", get(progress))
+        .route("/api/parent/settings", get(settings).put(set_settings))
         .route("/api/parent/children/{id}", put(edit_child))
         .route("/api/parent/children/{id}/budget", put(set_budget))
         .route("/api/parent/children/{id}/extra", post(grant_extra))
+        .route(
+            "/api/parent/children/{id}/extra/{grant}",
+            delete(remove_extra),
+        )
         .route("/api/parent/children/{id}/history", get(child_history))
         .route("/api/parent/policies", get(policies).post(add_policy))
         .route("/api/parent/policies/preview", post(preview))
@@ -247,6 +252,52 @@ async fn grant_extra(
     let note = b.note.as_deref().map(str::trim).filter(|n| !n.is_empty());
     let grant = crate::play::grant_extra(&c, &id, b.videos, b.minutes, &by, note, unix_now())
         .map_err(ApiError::internal)?;
+    Ok(Json(json!({"id": grant})))
+}
+
+/// Family-level settings: how long a child keeps browsing after the limit is reached.
+async fn settings(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+) -> Result<Json<Value>> {
+    let g = crate::play::grace_s(&conn(&s, &f)?).map_err(ApiError::internal)?;
+    Ok(Json(json!({"grace_minutes": g as f64 / 60.0})))
+}
+
+#[derive(Deserialize)]
+struct SettingsBody {
+    grace_minutes: f64,
+}
+
+async fn set_settings(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    Json(b): Json<SettingsBody>,
+) -> Result<Json<Value>> {
+    if !b.grace_minutes.is_finite() || !(0.0..=60.0).contains(&b.grace_minutes) {
+        return Err(bad("the grace is between 0 and 60 minutes"));
+    }
+    crate::play::set_grace_s(&conn(&s, &f)?, (b.grace_minutes * 60.0).round() as i64)
+        .map_err(ApiError::internal)?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Undoes an extra grant by appending a reversal; the grant stays in the history, marked removed.
+/// Removing it again, or after it has lapsed, changes nothing.
+async fn remove_extra(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    actor: Option<Extension<crate::Actor>>,
+    Path((id, grant)): Path<(String, String)>,
+) -> Result<Json<Value>> {
+    let c = conn(&s, &f)?;
+    let by = actor.and_then(|Extension(a)| a.get()).map_or_else(
+        || "parent".to_string(),
+        |w| w.trim_start_matches("parent:").to_string(),
+    );
+    if !crate::play::reverse_grant(&c, &id, &grant, &by, unix_now()).map_err(ApiError::internal)? {
+        return Err(not_found("grant"));
+    }
     Ok(Json(json!({"id": grant})))
 }
 
@@ -590,7 +641,7 @@ async fn library_videos(
         "youtube_id": v.youtube_id, "title": v.title, "channel_title": v.channel_title,
         "policy_id": v.policy_id, "policy_kind": v.policy_kind,
         "policy_youtube_id": v.policy_youtube_id, "child_id": v.child_id,
-        "plays": v.plays, "watched_s": v.watched_s})).collect::<Vec<_>>()}),
+        "plays": v.plays, "watched_s": v.watched_s, "duration_s": v.duration_s})).collect::<Vec<_>>()}),
     ))
 }
 

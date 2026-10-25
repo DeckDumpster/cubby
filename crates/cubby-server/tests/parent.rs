@@ -293,6 +293,36 @@ async fn the_library_lists_groups_then_a_groups_videos_and_searches_them() {
 }
 
 #[tokio::test]
+async fn the_library_videos_carry_their_duration_or_null() {
+    let e = env().await;
+    e.videos();
+    e.family()
+        .execute("UPDATE videos SET duration_s=423 WHERE youtube_id='v1'", [])
+        .unwrap();
+    e.family()
+        .execute(
+            "UPDATE videos SET duration_s=NULL WHERE youtube_id='v2'",
+            [],
+        )
+        .unwrap();
+    e.parent(
+        "POST",
+        "/api/parent/policies",
+        Some(json!({"url": "youtube.com/channel/ch1"})),
+    )
+    .await;
+    let (_, vids) = e
+        .parent(
+            "GET",
+            "/api/parent/library/videos?group=ch1&sort=title",
+            None,
+        )
+        .await;
+    assert_eq!(vids["videos"][0]["duration_s"], 423);
+    assert!(vids["videos"][1]["duration_s"].is_null());
+}
+
+#[tokio::test]
 async fn approving_a_more_from_channel_request_adds_a_policy_and_opens_the_channel() {
     let e = env().await;
     e.videos();
@@ -868,6 +898,189 @@ async fn an_empty_or_absurd_extra_grant_is_refused() {
             "/api/parent/children/nobody/extra",
             Some(json!({"videos": 1})),
         )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_child_request_reaches_the_parent_inbox_once() {
+    let e = env().await;
+    e.videos();
+    let (child, tok) = e.child_with_device().await;
+    e.parent(
+        "POST",
+        "/api/parent/policies",
+        Some(json!({"url": "https://youtu.be/v1", "child_id": child})),
+    )
+    .await;
+    let post = |tok: String, body: Value| {
+        let e = &e;
+        async move {
+            let r = Request::post("/api/child/request")
+                .header("authorization", format!("Bearer {tok}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            e.call(r).await
+        }
+    };
+    let (s, a) = post(tok.clone(), json!({"kind": "like", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::OK, "{a}");
+    let (s, b) = post(tok.clone(), json!({"kind": "like", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(a["id"], b["id"], "a duplicate open request is the same row");
+    let (_, inbox) = e.parent("GET", "/api/parent/requests", None).await;
+    assert_eq!(inbox.as_array().unwrap().len(), 1, "{inbox}");
+    assert_eq!(inbox[0]["kind"], "like");
+    assert_eq!(inbox[0]["youtube_id"], "v1");
+    assert_eq!(inbox[0]["child_name"], "Ada");
+
+    let (s, _) = post(tok.clone(), json!({"kind": "like", "youtube_id": "w1"})).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "a video the child may not watch");
+    let (s, _) = post(tok.clone(), json!({"kind": "nope", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = post("bad".into(), json!({"kind": "like", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (_, inbox) = e.parent("GET", "/api/parent/requests", None).await;
+    assert_eq!(inbox.as_array().unwrap().len(), 1);
+}
+
+impl Env {
+    async fn child_get(&self, token: &str, path: &str) -> (StatusCode, Value) {
+        let r = Request::get(path)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        self.call(r).await
+    }
+}
+
+#[tokio::test]
+async fn once_the_grace_is_over_the_child_api_refuses_browsing_until_a_grant() {
+    let e = env().await;
+    e.videos();
+    let (child, tok) = e.child_with_device().await;
+    e.parent(
+        "POST",
+        "/api/parent/policies",
+        Some(json!({"url": "https://www.youtube.com/channel/ch1"})),
+    )
+    .await;
+    let (s, _) = e
+        .parent(
+            "PUT",
+            &format!("/api/parent/children/{child}/budget"),
+            Some(json!({"video_equivalents": 0.0})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Budget spent: browsing works for the grace, with the countdown, and play is refused.
+    let (s, home) = e.child_get(&tok, "/api/child/home").await;
+    assert_eq!(s, StatusCode::OK, "{home}");
+    assert_eq!(home["limit"]["state"], "grace");
+    assert!(home["limit"]["grace_left_s"].as_i64().unwrap() > 100);
+    assert_eq!(e.child_play(&tok, "v1").await["refused"], "out-of-videos");
+    assert_eq!(
+        e.child_get(&tok, "/api/child/search?q=one").await.0,
+        StatusCode::OK
+    );
+
+    // The grace is a family setting.
+    let (s, _) = e
+        .parent(
+            "PUT",
+            "/api/parent/settings",
+            Some(json!({"grace_minutes": 5})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, st) = e.parent("GET", "/api/parent/settings", None).await;
+    assert_eq!(st["grace_minutes"], 5.0);
+    let (_, home) = e.child_get(&tok, "/api/child/home").await;
+    assert!(home["limit"]["grace_left_s"].as_i64().unwrap() > 200);
+    let (s, _) = e
+        .parent(
+            "PUT",
+            "/api/parent/settings",
+            Some(json!({"grace_minutes": 99})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Ten minutes on, the grace is over: every browse call is refused, on any device.
+    e.family()
+        .execute("UPDATE limit_reached SET reached_at = reached_at - 600", [])
+        .unwrap();
+    for p in [
+        "/api/child/home",
+        "/api/child/search?q=one",
+        "/api/child/next?after=v1",
+        "/api/child/recent",
+    ] {
+        let (s, v) = e.child_get(&tok, p).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{p}");
+        assert_eq!(v["error"], "locked");
+        assert_eq!(v["limit"]["state"], "locked");
+    }
+
+    // A parent grant lifts it at once.
+    let (s, _) = e
+        .parent(
+            "POST",
+            &format!("/api/parent/children/{child}/extra"),
+            Some(json!({"videos": 1})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, home) = e.child_get(&tok, "/api/child/home").await;
+    assert_eq!(s, StatusCode::OK, "{home}");
+    assert_eq!(home["limit"]["state"], "open");
+}
+
+#[tokio::test]
+async fn removing_a_grant_appends_a_reversal_and_lowers_the_limits() {
+    let e = env().await;
+    let (child, _tok) = e.child_with_device().await;
+    e.parent(
+        "PUT",
+        &format!("/api/parent/children/{child}/budget"),
+        Some(json!({"video_equivalents": 3.0, "minutes_cap": 60})),
+    )
+    .await;
+    let path = format!("/api/parent/children/{child}/extra");
+    e.parent("POST", &path, Some(json!({"minutes": 15}))).await;
+    let (_, g) = e.parent("POST", &path, Some(json!({"videos": 1}))).await;
+    let gid = g["id"].as_str().unwrap().to_string();
+
+    let (s, _) = e.parent("DELETE", &format!("{path}/{gid}"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    // Removing twice is a no-op.
+    let (s, _) = e.parent("DELETE", &format!("{path}/{gid}"), None).await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (_, p) = e.parent("GET", "/api/parent/progress", None).await;
+    let k = &p[0];
+    assert_eq!(k["videos"]["limit"], 3.0);
+    assert_eq!(k["minutes"]["limit"], 75.0);
+    let grants = k["grants"].as_array().unwrap();
+    assert_eq!(grants.len(), 2);
+    let removed: Vec<_> = grants.iter().filter(|g| g["removed_at"].is_i64()).collect();
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0]["id"], gid);
+    assert_eq!(removed[0]["removed_by"], PARENT);
+    assert_eq!(removed[0]["videos"], 1.0);
+}
+
+#[tokio::test]
+async fn a_grant_that_is_not_this_childs_cannot_be_removed() {
+    let e = env().await;
+    let (child, _tok) = e.child_with_device().await;
+    let path = format!("/api/parent/children/{child}/extra");
+    let (s, _) = e.parent("DELETE", &format!("{path}/nonesuch"), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = e
+        .parent("DELETE", "/api/parent/children/nobody/extra/nonesuch", None)
         .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }

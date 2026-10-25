@@ -11,6 +11,11 @@
 		SEEK_JUMP_S,
 		clock,
 	endReason,
+		graceText,
+		minutesLeft,
+		moreAfterThis,
+		startNotice,
+		timeNotice,
 		loadYT,
 		localUrl,
 		offList,
@@ -20,11 +25,15 @@
 		token,
 		parseHome,
 		parseSearch,
-		parseRecent
+		parseRecent,
+		canSaveForLater,
+		watchLaterPath
 	} from '$lib/child.js';
 
-	type Tile = { youtube_id: string; title: string; channel_title?: string; channel_avatar?: string; thumb?: string };
-	type Remaining = { videos: number | null; minutes: number | null };
+	type Tile = { youtube_id: string; title: string; channel_id?: string; channel_title?: string; channel_avatar?: string; thumb?: string };
+	type Channel = { channel_id: string; title: string; thumb?: string };
+	type ChannelPage = { channel: Channel; tiles: Tile[]; can_request: boolean; requested: boolean };
+	type Remaining = { videos: number | null; minutes: number | null; window_left_s?: number | null };
 
 	const SHOWN = 8;
 	const origin = typeof location === 'undefined' ? 'http://localhost' : location.origin;
@@ -35,6 +44,8 @@
 	let child = $state<{ name?: string; avatar?: string }>({});
 	let remaining = $state<Remaining>({ videos: null, minutes: null });
 	let total = $state<number | null>(null);
+	let channels = $state<Channel[]>([]);
+	let channelPage = $state<ChannelPage | null>(null);
 	let sections = $state<{ key: string; title: string; tiles: Tile[] }[]>([]);
 	let expanded = $state<Record<string, boolean>>({});
 	let query = $state('');
@@ -52,6 +63,14 @@
 	let view = $state<'grid' | 'loading' | 'playing' | 'ended' | 'refused' | 'stopped'>('grid');
 	let current = $state<Tile | null>(null);
 	let refusal = $state('');
+	// Cubby's own notice under the player (never over it): what is left, and the stop nudge.
+	let notice = $state('');
+	let nudgeStage = 0;
+	let prevVideos: number | null = null;
+	let refusalReason = $state('');
+	// Ids on the child's Watch later list, and the row of tiles shown on the landing page.
+	let saved = $state<Record<string, boolean>>({});
+	let later = $state<Tile[]>([]);
 	let paused = $state(false);
 	let playing = $state(false);
 	// False from every start, resume and seek until PLAYING has lasted SETTLE_MS: the iframe stays visibility:hidden meanwhile.
@@ -66,6 +85,8 @@
 	let poll: ReturnType<typeof setInterval> | undefined;
 	let suggestions = $state<Tile[]>([]);
 	let sent = $state<Record<string, boolean>>({});
+	let asking = $state<Record<string, boolean>>({});
+	let askFailed = $state(false);
 	let host: HTMLDivElement | undefined = $state();
 	// Fullscreen is Cubby's own container, never the YouTube iframe. 'api' = element fullscreen,
 	// 'fill' = the CSS fixed-viewport fallback (iPhone Safari, WKWebView without element fullscreen).
@@ -76,6 +97,36 @@
 	let grantId = '';
 	let lastBeat = 0;
 	let timer: ReturnType<typeof setInterval> | undefined;
+
+	// The limit state the server reports: grace counts down from the server's seconds, so a clock
+	// skew on this device cannot lengthen it; locked is the whole-site "All done for today".
+	let locked = $state(false);
+	let graceEnd = $state<number | null>(null);
+	let graceLeft = $state(0);
+	let graceTick: ReturnType<typeof setInterval> | undefined;
+
+	function takeLimit(limit: any) {
+		clearInterval(graceTick);
+		graceTick = undefined;
+		graceEnd = null;
+		if (limit?.state === 'locked') {
+			locked = true;
+			return;
+		}
+		locked = false;
+		if (limit?.state === 'grace') {
+			graceEnd = Date.now() + limit.grace_left_s * 1000;
+			graceLeft = limit.grace_left_s;
+			graceTick = setInterval(() => {
+				graceLeft = Math.max(0, ((graceEnd ?? 0) - Date.now()) / 1000);
+				if (graceLeft <= 0) {
+					clearInterval(graceTick);
+					graceTick = undefined;
+					loadHome();
+				}
+			}, 1000);
+		}
+	}
 
 	const badgeInfo = $derived(badge(remaining, total));
 
@@ -89,16 +140,24 @@
 			token.clear();
 			paired = false;
 		}
+		if (res.status === 403 && (res.data as any)?.error === 'locked') {
+			destroyPlayer();
+			takeLimit((res.data as any).limit);
+		}
 		return res;
 	}
 
 	async function loadHome() {
 		const { status, data } = await guarded(api('/api/child/home'));
 		if (status !== 200) return;
+		takeLimit(data.limit);
 		child = data.child ?? {};
 		remaining = data.remaining ?? remaining;
 		total = data.total_videos ?? total;
 		sections = parseHome(data).sections;
+		later = data.watch_later ?? [];
+		saved = Object.fromEntries((data.saved ?? []).map((id: string) => [id, true]));
+		channels = data.channels ?? [];
 		loadRecentRow();
 	}
 
@@ -179,6 +238,43 @@
 	$effect(() => {
 		if (showRecent && untrack(() => paired)) untrack(() => loadRecentPage(true));
 	});
+
+	// /watch?channel=ID is a channel page; like search, the URL is the state so back leaves it.
+	const urlChannel = $derived(page.url.searchParams.get('channel') ?? '');
+	let channelSeq = 0;
+
+	async function loadChannel(id: string) {
+		const seq = ++channelSeq;
+		if (!id) {
+			channelPage = null;
+			return;
+		}
+		const { status, data } = await guarded(api(`/api/child/channel/${encodeURIComponent(id)}`));
+		if (seq !== channelSeq) return;
+		channelPage = status === 200 ? data : null;
+	}
+
+	$effect(() => {
+		const id = urlChannel;
+		if (untrack(() => paired)) loadChannel(id);
+	});
+
+	async function askForMore() {
+		if (!channelPage) return;
+		const id = channelPage.channel.channel_id;
+		const { status, data } = await api(`/api/child/channel/${encodeURIComponent(id)}/request`, { method: 'POST' });
+		if (status === 200 && channelPage) {
+			channelPage.can_request = data.can_request;
+			channelPage.requested = data.requested;
+		}
+	}
+
+	async function openChannel(id: string) {
+		await leaveWatch();
+		view = 'grid';
+		current = null;
+		await goto(`/watch?channel=${encodeURIComponent(id)}`, { noScroll: true });
+	}
 
 	async function runSearch(q: string) {
 		const seq = ++searchSeq;
@@ -293,7 +389,27 @@
 		const { status, data } = await api(`/api/child/grant/${grantId}/beat`, { body: { position_s: position, state } });
 		if (status !== 200) return;
 		remaining = data.remaining ?? remaining;
-		if (data.stop) await finish('stop', 'stopped');
+		updateNotice(data.remaining);
+		if (data.limit) takeLimit(data.limit);
+		if (data.stop || locked) await finish('stop', 'stopped');
+	}
+
+	function updateNotice(r: Remaining | undefined) {
+		if (!r) return;
+		const v = r.videos;
+		// Charges only lower the count, so a rise is a parent grant: say so with the new total.
+		if (v != null && prevVideos != null && v > prevVideos + 0.01 && nudgeStage === 0) {
+			const n = moreAfterThis(v);
+			if (n != null) notice = startNotice(n);
+		}
+		prevVideos = v;
+		const mins = minutesLeft(r);
+		if (mins != null && mins > 5) nudgeStage = 0;
+		const n = timeNotice(mins, nudgeStage);
+		if (n) {
+			notice = n.text;
+			nudgeStage = n.stage;
+		}
 	}
 
 	async function closeGrant(reason: string) {
@@ -365,6 +481,14 @@
 		}
 	}
 
+	async function toggleSaved(t: Tile) {
+		const was = !!saved[t.youtube_id];
+		saved[t.youtube_id] = !was;
+		const { status } = await guarded(api(watchLaterPath(t.youtube_id), { method: was ? 'DELETE' : 'PUT' }));
+		if (status !== 200) saved[t.youtube_id] = was;
+		else if (view === 'grid' && !results) await loadHome();
+	}
+
 	async function leaveWatch() {
 		if (view !== 'playing') return;
 		await beat('closed').catch(() => {});
@@ -391,12 +515,19 @@
 			return;
 		}
 		if (data.refused) {
+			if (data.limit) takeLimit(data.limit);
 			refusal = refusalMessage(data.refused, data.next_start);
+			refusalReason = data.refused;
 			view = 'refused';
 			return;
 		}
 		grantId = data.grant_id;
 		remaining = data.remaining ?? remaining;
+		nudgeStage = 0;
+		prevVideos = data.remaining?.videos ?? null;
+		const more = moreAfterThis(data.remaining?.videos);
+		notice = more == null ? '' : startNotice(more);
+		updateNotice(data.remaining);
 		view = 'playing';
 		await tick();
 		try {
@@ -470,21 +601,45 @@
 	async function ask(kind: 'like' | 'more-from-channel') {
 		if (!current) return;
 		const key = `${kind}:${current.youtube_id}`;
-		sent[key] = true;
-		await api('/api/child/request', { body: { kind, youtube_id: current.youtube_id } });
+		if (asking[key] || sent[key]) return;
+		asking[key] = true;
+		askFailed = false;
+		let ok = false;
+		try {
+			const r = await api('/api/child/request', { body: { kind, youtube_id: current.youtube_id } });
+			ok = r.status >= 200 && r.status < 300;
+		} catch {
+			ok = false;
+		}
+		asking[key] = false;
+		if (ok) sent[key] = true;
+		else askFailed = true;
 	}
 </script>
 
 <svelte:head><title>{view === 'playing' && current ? `${current.title} · Cubby` : 'Cubby'}</title></svelte:head>
 
 {#snippet tile(t: Tile)}
-	<button class="tile" onclick={() => open(t)}>
-		{#if thumb(t)}<img class="thumb" src={thumb(t)} alt="" />{:else}<span class="thumb blank"></span>{/if}
-		<span class="meta">
-			{#if localUrl(t.channel_avatar, origin)}<img class="avatar" src={localUrl(t.channel_avatar, origin)} alt="" />{/if}
-			<span class="title">{t.title}</span>
-		</span>
-	</button>
+	<div class="tilewrap">
+		<button class="tile" onclick={() => open(t)}>
+			{#if thumb(t)}<img class="thumb" src={thumb(t)} alt="" />{:else}<span class="thumb blank"></span>{/if}
+			<span class="meta">
+				{#if localUrl(t.channel_avatar, origin)}<img class="avatar" src={localUrl(t.channel_avatar, origin)} alt="" />{/if}
+				<span class="title">{t.title}</span>
+			</span>
+		</button>
+		<button
+			class="later"
+			class:on={saved[t.youtube_id]}
+			data-testid="save-later"
+			aria-pressed={!!saved[t.youtube_id]}
+			aria-label={saved[t.youtube_id] ? 'Saved to Watch later, tap to remove' : 'Add to Watch later'}
+			onclick={() => toggleSaved(t)}
+		>
+			<span aria-hidden="true">{saved[t.youtube_id] ? '✓' : '🕒'}</span>
+			<span>{saved[t.youtube_id] ? 'Saved' : 'Later'}</span>
+		</button>
+	</div>
 {/snippet}
 
 <main class="watch">
@@ -507,6 +662,11 @@
 			<button class="primary go" type="submit">Go</button>
 			{#if pairError}<p class="error" role="alert">{pairError}</p>{/if}
 		</form>
+	{:else if locked}
+		<div class="card done" data-testid="locked">
+			<h1>All done for today</h1>
+			<p>See you tomorrow!</p>
+		</div>
 	{:else}
 		<header>
 			<span class="brand"><span class="logo">C</span>Cubby</span>
@@ -522,6 +682,10 @@
 
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
 
+		{#if graceEnd !== null}
+			<p class="grace" data-testid="grace" role="status">{graceText(graceLeft)}</p>
+		{/if}
+
 		{#if view === 'grid'}
 			<form class="search" role="search" onsubmit={search}>
 				<span class="box">
@@ -530,6 +694,24 @@
 				</span>
 				<button class="primary" type="submit">Search</button>
 			</form>
+			{#if urlChannel}
+				<div class="searched">
+					<button type="button" class="home" onclick={() => goto('/watch', { noScroll: true })}>← Home</button>
+					<h2>{channelPage?.channel.title ?? 'Channel'}</h2>
+				</div>
+				{#if channelPage}
+					{#if channelPage.requested}
+						<p class="asked" data-testid="channel-waiting">Asked — waiting for a grown-up</p>
+					{:else if channelPage.can_request}
+						<button class="primary ask" data-testid="channel-ask" onclick={askForMore}>Ask for more from this channel</button>
+					{/if}
+					<section>
+						<div class="grid">{#each channelPage.tiles as t (t.youtube_id)}{@render tile(t)}{/each}</div>
+					</section>
+				{:else}
+					<p class="empty">Nothing here yet.</p>
+				{/if}
+			{:else}
 			{#if urlQuery}
 				<div class="searched">
 					<button type="button" class="home" onclick={home}>← Home</button>
@@ -553,6 +735,12 @@
 				{#if sections.every((s) => s.tiles.length === 0) && recentRow.length === 0}
 					<p class="empty" data-testid="nothing-allowed">Nothing is allowed yet. Ask a grown-up to add some videos.</p>
 				{/if}
+				{#if later.length}
+					<section data-testid="watch-later-row">
+						<h2>Watch later</h2>
+						<div class="grid">{#each later as t (t.youtube_id)}{@render tile(t)}{/each}</div>
+					</section>
+				{/if}
 				{#if recentRow.length}
 					<section data-testid="recent-row">
 						<div class="searched">
@@ -575,12 +763,36 @@
 						</section>
 					{/if}
 				{/each}
+				{#if channels.length}
+					<section data-testid="channels-row">
+						<h2>Channels</h2>
+						<div class="chips">
+							{#each expanded.channels ? channels : channels.slice(0, SHOWN) as c (c.channel_id)}
+								<a class="chip" href="/watch?channel={encodeURIComponent(c.channel_id)}">
+									{#if localUrl(c.thumb, origin)}<img class="avatar" src={localUrl(c.thumb, origin)} alt="" />{:else}<span class="avatar blank"></span>{/if}
+									<span class="title">{c.title}</span>
+								</a>
+							{/each}
+						</div>
+						{#if !expanded.channels && channels.length > SHOWN}
+							<button class="more" onclick={() => (expanded.channels = true)}>See all</button>
+						{/if}
+					</section>
+				{/if}
+			{/if}
 			{/if}
 		{:else if view === 'loading'}
 			<p class="empty">One moment…</p>
 		{:else if view === 'refused'}
 			<div class="card" data-testid="refusal">
 				<h1>{refusal}</h1>
+				{#if current && canSaveForLater(refusalReason)}
+					{#if saved[current.youtube_id]}
+						<p class="saved-note" data-testid="saved-note">Saved! You can watch it later. 🎉</p>
+					{:else}
+						<button class="primary" data-testid="save-for-later" onclick={() => current && toggleSaved(current)}>🕒 Save it for later</button>
+					{/if}
+				{/if}
 				<button class="primary" onclick={back}>OK</button>
 			</div>
 		{:else if view === 'stopped'}
@@ -599,6 +811,9 @@
 					</div>
 				{:else if current}
 					<h1 class="now">{current.title}</h1>
+					{#if current.channel_id && current.channel_title}
+						<p class="chan"><a href="/watch?channel={encodeURIComponent(current.channel_id)}" onclick={(e) => { e.preventDefault(); openChannel(current!.channel_id!); }}>{current.channel_title}</a></p>
+					{/if}
 					<div class="stage">
 						<div class="player" class:hidden={paused} class:unsettled={!settled && !blocked} data-settled={settled} bind:this={host}></div>
 						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -620,14 +835,18 @@
 						<span data-testid="clock">{clock(pos)} / {dur ? `-${clock(dur - pos)}` : '--:--'}</span>
 						<button class="big" data-testid="fullscreen" aria-pressed={fsMode !== 'off'} aria-label={fsMode === 'off' ? 'Full screen' : 'Exit full screen'} onclick={toggleFullscreen}>{fsMode === 'off' ? '⛶' : '✕'}</button>
 					</div>
+					{#if notice}
+						<p class="notice" data-testid="notice" role="status"><span aria-hidden="true">⏰</span> {notice}</p>
+					{/if}
 					<div class="actions">
-						<button disabled={sent[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
+						<button disabled={sent[`like:${current.youtube_id}`] || asking[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
 							{sent[`like:${current.youtube_id}`] ? 'Asked! 👍' : '👍 I like this'}
 						</button>
-						<button disabled={sent[`more-from-channel:${current.youtube_id}`]} onclick={() => ask('more-from-channel')}>
+						<button disabled={sent[`more-from-channel:${current.youtube_id}`] || asking[`more-from-channel:${current.youtube_id}`]} onclick={() => ask('more-from-channel')}>
 							{sent[`more-from-channel:${current.youtube_id}`] ? 'Asked!' : 'More from this channel'}
 						</button>
 					</div>
+					{#if askFailed}<p role="alert" class="ask-failed">Couldn't send — try again</p>{/if}
 				{/if}
 			</div>
 		{/if}
@@ -646,6 +865,8 @@
 	h2 { font-size: 1.6rem; margin: var(--space-5) 0 var(--space-3); }
 	h1.now { font-size: 1.5rem; margin: 0 0 var(--space-3); }
 
+	.grace { margin: 0 0 var(--space-3); font-weight: 700; text-align: center; background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-4); }
+	.done { margin: 20vh auto 0; text-align: center; }
 	.badge { display: flex; flex-direction: column; gap: var(--space-1); margin-left: auto; font-weight: 700; background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-4); }
 	.meter { display: block; width: 14rem; max-width: 100%; height: 0.8rem; background: var(--surface-2); border: 1px solid var(--muted); border-radius: 1rem; overflow: hidden; }
 	.fill { display: block; height: 100%; background: var(--ok); }
@@ -664,6 +885,11 @@
 	.rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; column-gap: var(--space-4); row-gap: 0; }
 	.rail > :global(*) { min-width: 0; }
 	.seeall { margin-left: auto; }
+	.tilewrap { position: relative; }
+	.tilewrap .tile { width: 100%; }
+	.later { position: absolute; top: var(--space-2); right: var(--space-2); display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch); padding: 0 var(--space-3); font-size: 1rem; box-shadow: var(--shadow); }
+	.later.on { background: var(--ok); border-color: var(--ok); color: var(--accent-text); }
+	.saved-note { font-size: 1.4rem; font-weight: 700; margin: 0 0 var(--space-4); }
 	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; min-height: 0; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
 	.thumb { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--surface-2); }
 	.meta { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3); }
@@ -709,8 +935,16 @@
 	.clear { position: absolute; right: 0.25rem; top: 50%; transform: translateY(-50%); min-height: var(--touch); min-width: var(--touch); padding: 0; border: 0; background: none; font-size: 1.25rem; }
 	.searched { display: flex; gap: var(--space-4); align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; }
 	.searched h2 { margin: 0; }
+	.chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--space-3); }
+	.chip { display: flex; align-items: center; gap: var(--space-3); min-height: var(--touch); padding: var(--space-2) var(--space-3); border: 2px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); text-decoration: none; box-shadow: var(--shadow); }
+	.chip .avatar { width: 3rem; height: 3rem; object-fit: cover; background: var(--surface-2); }
+	.asked { font-weight: 700; color: var(--muted); margin: 0 0 var(--space-4); }
+	.ask { margin-bottom: var(--space-4); }
+	.chan { margin: 0 0 var(--space-3); font-size: 1.1rem; }
+	.chan a { color: var(--accent); font-weight: 700; }
 	.hidden { display: none; }
 	.stage:has(.hidden) { background: var(--surface); }
+	.notice { display: flex; gap: var(--space-3); align-items: center; margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: 12px; background: var(--surface-2, #fff4d6); color: inherit; border: 2px solid currentColor; font-size: 1.25rem; font-weight: 700; }
 	.controls { display: flex; gap: var(--space-4); align-items: center; margin-top: var(--space-4); }
 	.controls input { flex: 1; min-width: 0; min-height: var(--touch); padding: 0; accent-color: var(--accent); }
 	.controls span { font-variant-numeric: tabular-nums; font-weight: 700; }

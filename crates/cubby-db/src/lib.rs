@@ -10,6 +10,7 @@ pub use family::{FAMILY_VERSION, open_family};
 pub use registry::{Family, Registry};
 pub mod identity;
 pub mod parent;
+pub mod playlists;
 
 pub mod browse;
 

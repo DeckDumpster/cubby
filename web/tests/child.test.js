@@ -9,7 +9,9 @@ import {
 	PLAYER_HOST,
 	beatDue,
 	endReason,
-	loadYT
+	loadYT,
+	canSaveForLater,
+	watchLaterPath
 } from '../src/lib/child.js';
 
 test('the pause card is for the CubbyShell user agent only', () => {
@@ -89,4 +91,37 @@ test('the page reads the server search payload as tiles', () => {
 test('parseRecent reads tiles and the more flag, and survives a bad payload', () => {
 	assert.deepEqual(parseRecent({ tiles: [{ youtube_id: 'a' }], more: true }), { tiles: [{ youtube_id: 'a' }], more: true });
 	assert.deepEqual(parseRecent(null), { tiles: [], more: false });
+});
+
+import { graceText } from '../src/lib/child.js';
+
+test('the grace countdown reads in plain words', () => {
+	assert.equal(graceText(120), '2 minutes to look around');
+	assert.equal(graceText(61), '2 minutes to look around');
+	assert.equal(graceText(60), '60 seconds to look around');
+	assert.equal(graceText(1), '1 second to look around');
+	assert.equal(graceText(-5), '0 seconds to look around');
+});
+
+import { moreAfterThis, startNotice, minutesLeft, timeNotice } from '../src/lib/child.js';
+
+test('notices: counts after this video, nudge stages', () => {
+	assert.strictEqual(moreAfterThis(3), 2);
+	assert.strictEqual(moreAfterThis(1.5), 0);
+	assert.strictEqual(moreAfterThis(null), null);
+	assert.strictEqual(startNotice(0), 'This is the last video.');
+	assert.strictEqual(startNotice(1), 'You can watch 1 more video after this one.');
+	assert.strictEqual(minutesLeft({ minutes: 9, window_left_s: 120 }), 2);
+	assert.strictEqual(minutesLeft({ minutes: null }), null);
+	assert.strictEqual(timeNotice(6, 0), null);
+	assert.deepEqual(timeNotice(4.9, 0), { text: 'After 5 more minutes, videos will stop.', stage: 1 });
+	assert.strictEqual(timeNotice(4.5, 1), null);
+	assert.deepEqual(timeNotice(0.9, 1), { text: 'After 1 more minute, videos will stop.', stage: 2 });
+	assert.strictEqual(timeNotice(0.5, 2), null);
+});
+
+test('only a refusal that is not about the video itself offers Save it for later', () => {
+	for (const r of ['out-of-videos', 'out-of-minutes', 'not-now']) assert.equal(canSaveForLater(r), true);
+	assert.equal(canSaveForLater('not-allowed'), false);
+	assert.equal(watchLaterPath('a b'), '/api/child/playlists/watch_later/items/a%20b');
 });

@@ -559,6 +559,7 @@ pub struct LibraryVideo {
     pub child_id: Option<String>,
     pub plays: i64,
     pub watched_s: f64,
+    pub duration_s: Option<i64>,
 }
 
 /// The group holding videos allowed one by one.
@@ -570,7 +571,7 @@ const LIBRARY_ENTRIES: &str = "WITH e AS (
     SELECT v.youtube_id AS youtube_id, v.title AS title, v.channel_title AS channel_title,
            CASE WHEN p.kind='video' THEN 'direct' ELSE COALESCE(v.channel_id,'') END AS gkey,
            p.id AS pid, p.kind AS pkind, p.youtube_id AS pyt, a.child_id AS child_id,
-           a.changed_at AS changed_at
+           a.changed_at AS changed_at, v.duration_s AS duration_s
     FROM allowed_videos a
     JOIN allow_policies p ON p.id=a.policy_id AND p.removed_at IS NULL
     JOIN videos v ON v.youtube_id=a.youtube_id AND v.unavailable_at IS NULL
@@ -649,7 +650,7 @@ pub fn library_videos(
     let mut s = conn.prepare(&format!(
         "{LIBRARY_ENTRIES}
          SELECT e.youtube_id, e.title, e.channel_title, e.pid, e.pkind, e.pyt, e.child_id,
-                COALESCE(g.n,0) AS plays, COALESCE(g.t,0) AS watched, COUNT(*) OVER ()
+                COALESCE(g.n,0) AS plays, COALESCE(g.t,0) AS watched, COUNT(*) OVER (), e.duration_s
          FROM e LEFT JOIN (SELECT youtube_id, COUNT(*) AS n, SUM(COALESCE(watched_s,0)) AS t
                            FROM play_grants WHERE ?2 IS NULL OR child_id=?2 GROUP BY youtube_id) g
               ON g.youtube_id=e.youtube_id
@@ -679,6 +680,7 @@ pub fn library_videos(
                 child_id: r.get(6)?,
                 plays: r.get(7)?,
                 watched_s: r.get(8)?,
+                duration_s: r.get(10)?,
             })
         },
     )?;
@@ -708,6 +710,46 @@ pub fn open_requests(conn: &Connection) -> Result<Vec<OpenRequest>> {
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// A child's ask: `like` or `more-from-channel` about a video they may play. A second open
+/// request of the same kind for the same video from the same child returns the existing id.
+/// `None` means the video is not playable for that child.
+pub fn add_request(
+    conn: &Connection,
+    child_id: &str,
+    kind: &str,
+    youtube_id: &str,
+    now: i64,
+) -> Result<Option<String>> {
+    if !matches!(kind, "like" | "more-from-channel") {
+        return Err(DbError::Invalid(format!("unknown request kind {kind:?}")));
+    }
+    let playable: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM playable WHERE child_id=?1 AND youtube_id=?2)",
+        params![child_id, youtube_id],
+        |r| r.get(0),
+    )?;
+    if !playable {
+        return Ok(None);
+    }
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM requests WHERE child_id=?1 AND kind=?2 AND youtube_id=?3
+             AND resolved_at IS NULL",
+            params![child_id, kind, youtube_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(id) = existing {
+        return Ok(Some(id));
+    }
+    let id = ulid::Ulid::generate().to_string();
+    conn.execute(
+        "INSERT INTO requests(id,child_id,kind,youtube_id,created_at) VALUES (?1,?2,?3,?4,?5)",
+        params![id, child_id, kind, youtube_id, now],
+    )?;
+    Ok(Some(id))
 }
 
 /// Resolves an open request: `allow-channel` adds a channel policy for the requesting child,

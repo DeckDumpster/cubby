@@ -75,7 +75,8 @@ fn load_budget(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Bud
 fn extras(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<(f64, f64)> {
     conn.query_row(
         "SELECT COALESCE(SUM(videos),0), COALESCE(SUM(minutes),0) FROM budget_grants
-         WHERE child_id=?1 AND granted_at<=?2 AND expires_at>?2",
+         WHERE child_id=?1 AND granted_at<=?2 AND expires_at>?2
+           AND id NOT IN (SELECT grant_id FROM budget_grant_reversals)",
         params![child, now],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
@@ -100,6 +101,34 @@ pub(crate) fn grant_extra(
         params![id, child, now, budget::next_midnight(&tz, now), minutes, videos, by, note],
     )?;
     Ok(id)
+}
+
+/// Undoes a grant still in effect by appending a reversal; the grant's own row is never touched.
+/// Returns whether the grant belongs to `child`. Reversing twice, or an expired grant, records
+/// nothing more.
+pub(crate) fn reverse_grant(
+    conn: &Connection,
+    child: &str,
+    grant: &str,
+    by: &str,
+    now: i64,
+) -> rusqlite::Result<bool> {
+    let found = conn
+        .query_row(
+            "SELECT 1 FROM budget_grants WHERE id=?1 AND child_id=?2",
+            params![grant, child],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if found {
+        conn.execute(
+            "INSERT OR IGNORE INTO budget_grant_reversals(grant_id,reversed_at,reversed_by)
+             SELECT id, ?2, ?3 FROM budget_grants WHERE id=?1 AND expires_at>?2",
+            params![grant, now, by],
+        )?;
+    }
+    Ok(found)
 }
 
 fn load_base_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
@@ -162,6 +191,89 @@ fn usage(conn: &Connection, child: &str, tz: &str, now: i64) -> rusqlite::Result
     )
 }
 
+/// The family's browse grace after a limit is reached, in seconds.
+pub(crate) fn grace_s(conn: &Connection) -> rusqlite::Result<i64> {
+    let v: Option<String> = conn
+        .query_row(
+            "SELECT value FROM family_settings WHERE key='grace_s'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(v.and_then(|v| v.parse::<i64>().ok())
+        .filter(|g| *g >= 0)
+        .unwrap_or(budget::DEFAULT_GRACE_S))
+}
+
+pub(crate) fn set_grace_s(conn: &Connection, secs: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO family_settings(key,value) VALUES('grace_s',?1)
+         ON CONFLICT(key) DO UPDATE SET value=?1",
+        [secs.to_string()],
+    )?;
+    Ok(())
+}
+
+/// What the child may do at `now`. The first sighting of a spent budget is kept as the start of
+/// the grace, so a reload or another device of the same child sees the same countdown; a new day
+/// or a later parent grant starts it afresh.
+pub(crate) fn access_for(
+    conn: &Connection,
+    child: &str,
+    now: i64,
+) -> rusqlite::Result<budget::Access> {
+    let b = load_budget(conn, child, now)?;
+    let tz = child_tz(conn, child)?;
+    let u = usage(conn, child, &tz, now)?;
+    let Some(candidate) = budget::limit_reached_at(&b, u, &tz, now) else {
+        conn.execute("DELETE FROM limit_reached WHERE child_id=?1", [child])?;
+        return Ok(budget::Access::Open);
+    };
+    let stored: Option<i64> = conn
+        .query_row(
+            "SELECT reached_at FROM limit_reached WHERE child_id=?1",
+            [child],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let regranted = |t: i64| -> rusqlite::Result<bool> {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM budget_grants WHERE child_id=?1 AND granted_at>=?2)",
+            params![child, t],
+            |r| r.get(0),
+        )
+    };
+    let at = match stored {
+        Some(t) if t >= budget::day_start(&tz, now) && t <= now && !regranted(t)? => t,
+        _ => {
+            conn.execute(
+                "INSERT INTO limit_reached(child_id,reached_at) VALUES(?1,?2)
+                 ON CONFLICT(child_id) DO UPDATE SET reached_at=?2",
+                params![child, candidate],
+            )?;
+            candidate
+        }
+    };
+    Ok(budget::access(Some(at), grace_s(conn)?, now))
+}
+
+pub(crate) fn limit_json(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Value> {
+    let a = access_for(conn, child, now)?;
+    let tz = child_tz(conn, child)?;
+    Ok(access_json(a, &tz, now))
+}
+
+pub(crate) fn access_json(a: budget::Access, tz: &str, now: i64) -> Value {
+    let (state, ends) = match a {
+        budget::Access::Open => ("open", None),
+        budget::Access::Grace { ends_at } => ("grace", Some(ends_at)),
+        budget::Access::Locked => ("locked", None),
+    };
+    json!({"state": state, "grace_ends_at": ends,
+        "grace_left_s": ends.map(|e| (e - now).max(0)),
+        "resets_at": budget::next_midnight(tz, now)})
+}
+
 /// Closes every grant that has gone [`budget::BEAT_TIMEOUT_S`] without a beat. The charge was
 /// kept current by the beats, so closing only stamps the end.
 pub fn reap_stale(conn: &Connection, now: i64) -> rusqlite::Result<usize> {
@@ -179,6 +291,7 @@ pub fn play(
     now: i64,
 ) -> Result<PlayOutcome, PlayError> {
     reap_stale(conn, now)?;
+    access_for(conn, &dev.child_id, now)?;
     let duration: Option<f64> = conn
         .query_row(
             "SELECT v.duration_s FROM playable p JOIN videos v USING(youtube_id)
@@ -292,6 +405,7 @@ pub fn beat(
     let b = load_budget(conn, &dev.child_id, now)?;
     let tz = child_tz(conn, &dev.child_id)?;
     let u = usage(conn, &dev.child_id, &tz, now)?;
+    access_for(conn, &dev.child_id, now)?;
     Ok(BeatOutcome {
         remaining: budget::remaining(&b, u),
         stop: budget::cutoff(&b, u, &tz, now),
@@ -319,6 +433,14 @@ pub fn end(
         "UPDATE play_grants SET ended_at=?2, end_reason=?3 WHERE id=?1",
         params![grant_id, now, reason],
     )?;
+    if reason == "ended" {
+        // Watched to the end: it leaves Watch later.
+        conn.execute(
+            "DELETE FROM playlist_items WHERE youtube_id=(SELECT youtube_id FROM play_grants WHERE id=?1) \
+             AND playlist_id IN (SELECT id FROM playlists WHERE child_id=?2 AND kind='watch_later')",
+            params![grant_id, dev.child_id],
+        )?;
+    }
     Ok(())
 }
 
@@ -357,8 +479,17 @@ pub(crate) fn remaining_json_for(
     now: i64,
 ) -> rusqlite::Result<Value> {
     let b = load_budget(conn, child, now)?;
-    let u = usage(conn, child, &child_tz(conn, child)?, now)?;
-    Ok(remaining_json(budget::remaining(&b, u)))
+    let tz = child_tz(conn, child)?;
+    let u = usage(conn, child, &tz, now)?;
+    let left = budget::current_window_end(&b.daily_windows, &tz, now).map(|e| e - now);
+    Ok(remaining_json(budget::remaining(&b, u), left))
+}
+
+/// Seconds until the child's daily viewing window closes; `None` when unrestricted.
+fn window_left_s(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Option<i64>> {
+    let b = load_budget(conn, child, now)?;
+    let tz = child_tz(conn, child)?;
+    Ok(budget::current_window_end(&b.daily_windows, &tz, now).map(|e| e - now))
 }
 
 /// One child's progress against the limits, from the same budget, usage and clock functions the
@@ -388,8 +519,10 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
             "reached": left.is_some_and(|l| l <= 0.0)})
     };
     let mut q = conn.prepare(
-        "SELECT id, granted_at, expires_at, minutes, videos, granted_by, note FROM budget_grants
-         WHERE child_id=?1 AND expires_at>?2 ORDER BY granted_at DESC, rowid DESC",
+        "SELECT g.id, g.granted_at, g.expires_at, g.minutes, g.videos, g.granted_by, g.note,
+                x.reversed_at, x.reversed_by
+         FROM budget_grants g LEFT JOIN budget_grant_reversals x ON x.grant_id=g.id
+         WHERE g.child_id=?1 AND g.expires_at>?2 ORDER BY g.granted_at DESC, g.rowid DESC",
     )?;
     let grants = q
         .query_map(params![child, now], |r| {
@@ -397,7 +530,9 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
                 json!({"id": r.get::<_, String>(0)?, "at": r.get::<_, i64>(1)?,
                 "expires_at": r.get::<_, i64>(2)?, "minutes": r.get::<_, f64>(3)?,
                 "videos": r.get::<_, f64>(4)?, "by": r.get::<_, String>(5)?,
-                "note": r.get::<_, Option<String>>(6)?}),
+                "note": r.get::<_, Option<String>>(6)?,
+                "removed_at": r.get::<_, Option<i64>>(7)?,
+                "removed_by": r.get::<_, Option<String>>(8)?}),
             )
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -414,8 +549,14 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
     }))
 }
 
-fn remaining_json(r: Remaining) -> Value {
-    json!({"videos": r.videos, "minutes": r.minutes, "ve_minutes": r.ve_minutes})
+/// `window_left_s` is how long the daily viewing window stays open, `null` when unrestricted.
+fn remaining_json(r: Remaining, window_left_s: Option<i64>) -> Value {
+    json!({
+        "videos": r.videos,
+        "minutes": r.minutes,
+        "ve_minutes": r.ve_minutes,
+        "window_left_s": window_left_s,
+    })
 }
 
 impl From<PlayError> for ApiError {
@@ -454,7 +595,9 @@ async fn play_route(
     Json(body): Json<PlayBody>,
 ) -> Result<Json<Value>, ApiError> {
     let conn = open_own(&state, &family_id)?;
-    let outcome = play(&conn, &dev, &body.youtube_id, unix_now())?;
+    let now = unix_now();
+    let outcome = play(&conn, &dev, &body.youtube_id, now)?;
+    let window_left = window_left_s(&conn, &dev.child_id, now).map_err(PlayError::from)?;
     let (label, reason) = match &outcome {
         PlayOutcome::Granted { .. } => ("granted", ""),
         PlayOutcome::Refused { reason, .. } => ("refused", *reason),
@@ -474,9 +617,10 @@ async fn play_route(
         PlayOutcome::Granted {
             grant_id,
             remaining,
-        } => json!({"grant_id": grant_id, "remaining": remaining_json(remaining)}),
+        } => json!({"grant_id": grant_id, "remaining": remaining_json(remaining, window_left)}),
         PlayOutcome::Refused { reason, next_start } => {
-            json!({"refused": reason, "next_start": next_start})
+            json!({"refused": reason, "next_start": next_start,
+                "limit": limit_json(&conn, &dev.child_id, unix_now()).map_err(ApiError::internal)?})
         }
     }))
 }
@@ -489,7 +633,9 @@ async fn beat_route(
     Json(body): Json<BeatBody>,
 ) -> Result<Json<Value>, ApiError> {
     let conn = open_own(&state, &family_id)?;
-    let o = beat(&conn, &dev, &id, body.position_s, unix_now())?;
+    let now = unix_now();
+    let o = beat(&conn, &dev, &id, body.position_s, now)?;
+    let window_left = window_left_s(&conn, &dev.child_id, now).map_err(PlayError::from)?;
     if o.watched_delta_s > 0.0 {
         let l = vec![("child", dev.child_id.clone())];
         push(&state, "cubby_watch_seconds", o.watched_delta_s, "s", l);
@@ -498,7 +644,8 @@ async fn beat_route(
         let l = vec![("child", dev.child_id.clone())];
         push(&state, "cubby_charge", o.charge_delta, "1", l);
     }
-    let mut v = json!({"remaining": remaining_json(o.remaining), "stop": o.stop.is_some()});
+    let mut v = json!({"remaining": remaining_json(o.remaining, window_left), "stop": o.stop.is_some(),
+        "limit": limit_json(&conn, &dev.child_id, unix_now()).map_err(ApiError::internal)?});
     if let Some(grace) = o.stop {
         v["grace_s"] = json!(grace);
     }
@@ -553,6 +700,121 @@ mod tests {
             params![ve, cutoff, windows],
         )
         .unwrap();
+    }
+
+    use budget::Access;
+
+    /// One video of budget, spent by watching it through from `T0`; the limit is reached at T0+600.
+    fn spent_at_t0_plus_600() -> Connection {
+        let c = db();
+        budget_row(&c, 1.0, 0, "");
+        let id = grant(&c, "v1", T0);
+        watch(&c, &id, T0, 600);
+        c
+    }
+
+    #[test]
+    fn reaching_the_limit_starts_a_two_minute_grace_that_browse_survives_and_play_does_not() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(
+            access_for(&c, "kid", at).unwrap(),
+            Access::Grace { ends_at: at + 120 }
+        );
+        // The grace counts from reaching the limit, not from the next look.
+        assert_eq!(
+            access_for(&c, "kid", at + 100).unwrap(),
+            Access::Grace { ends_at: at + 120 }
+        );
+        assert!(matches!(
+            play(&c, &dev(), "v2", at + 100).unwrap(),
+            PlayOutcome::Refused {
+                reason: "out-of-videos",
+                ..
+            }
+        ));
+        assert_eq!(access_for(&c, "kid", at + 120).unwrap(), Access::Locked);
+        assert_eq!(
+            access_for(&c, "kid", at + 3 * 3600).unwrap(),
+            Access::Locked
+        );
+    }
+
+    #[test]
+    fn the_grace_length_is_a_family_setting() {
+        let c = spent_at_t0_plus_600();
+        assert_eq!(grace_s(&c).unwrap(), 120);
+        set_grace_s(&c, 300).unwrap();
+        let at = T0 + 600;
+        assert_eq!(
+            access_for(&c, "kid", at + 200).unwrap(),
+            Access::Grace { ends_at: at + 300 }
+        );
+        set_grace_s(&c, 0).unwrap();
+        assert_eq!(access_for(&c, "kid", at + 1).unwrap(), Access::Locked);
+    }
+
+    #[test]
+    fn a_parent_grant_lifts_the_lock_at_once_and_a_later_limit_gets_a_fresh_grace() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(access_for(&c, "kid", at + 500).unwrap(), Access::Locked);
+        grant_extra(&c, "kid", 1.0, 0.0, "parent", None, at + 500).unwrap();
+        assert_eq!(access_for(&c, "kid", at + 501).unwrap(), Access::Open);
+        let id = grant(&c, "v2", at + 510);
+        watch(&c, &id, at + 510, 600);
+        let again = at + 1110;
+        assert_eq!(
+            access_for(&c, "kid", again).unwrap(),
+            Access::Grace {
+                ends_at: again + 120
+            }
+        );
+    }
+
+    #[test]
+    fn a_grant_given_before_anyone_looked_still_beats_the_old_lock() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(
+            access_for(&c, "kid", at).unwrap(),
+            Access::Grace { ends_at: at + 120 }
+        );
+        grant_extra(&c, "kid", 1.0, 0.0, "parent", None, at + 10).unwrap();
+        let id = grant(&c, "v2", at + 20);
+        watch(&c, &id, at + 20, 600);
+        // Spent again with no read in between: the stored time predates the grant.
+        let later = at + 620;
+        assert_eq!(
+            access_for(&c, "kid", later).unwrap(),
+            Access::Grace {
+                ends_at: later + 120
+            }
+        );
+    }
+
+    #[test]
+    fn the_midnight_reset_lifts_the_lock() {
+        let c = spent_at_t0_plus_600();
+        let at = T0 + 600;
+        assert_eq!(access_for(&c, "kid", at + 3600).unwrap(), Access::Locked);
+        let midnight = budget::next_midnight("UTC", at);
+        assert_eq!(access_for(&c, "kid", midnight).unwrap(), Access::Open);
+    }
+
+    #[test]
+    fn a_closed_viewing_window_starts_the_grace_when_it_closed() {
+        let c = db();
+        budget_row(&c, 5.0, 0, r#"[["07:00","12:05"]]"#);
+        assert_eq!(access_for(&c, "kid", T0 + 60).unwrap(), Access::Open);
+        let closed = T0 + 5 * 60;
+        assert_eq!(
+            access_for(&c, "kid", closed + 60).unwrap(),
+            Access::Grace {
+                ends_at: closed + 120
+            }
+        );
+        assert_eq!(access_for(&c, "kid", closed + 121).unwrap(), Access::Locked);
     }
 
     #[test]
@@ -883,6 +1145,25 @@ mod tests {
     }
 
     #[test]
+    fn a_video_watched_to_the_end_leaves_watch_later_and_a_left_one_stays() {
+        let c = db();
+        for v in ["v1", "v2"] {
+            cubby_db::playlists::add(&c, "kid", "watch_later", v, T0).unwrap();
+        }
+        let id = grant(&c, "v1", T0);
+        end(&c, &dev(), &id, "left", T0 + 5).unwrap();
+        let left = |c: &Connection| {
+            cubby_db::playlists::list(c, "kid", "watch_later")
+                .unwrap()
+                .len()
+        };
+        assert_eq!(left(&c), 2);
+        let id = grant(&c, "v1", T0 + 10);
+        end(&c, &dev(), &id, "ended", T0 + 20).unwrap();
+        assert_eq!(left(&c), 1);
+    }
+
+    #[test]
     fn end_rejects_an_unknown_reason() {
         let c = db();
         let id = grant(&c, "v1", T0);
@@ -890,5 +1171,34 @@ mod tests {
             end(&c, &dev(), &id, "boredom", T0),
             Err(PlayError::BadInput("reason"))
         );
+    }
+}
+
+#[cfg(test)]
+mod reversal_tests {
+    use super::*;
+
+    #[test]
+    fn an_expired_grant_is_not_reversed_and_a_reversal_is_recorded_once() {
+        let mut c = Connection::open_in_memory().unwrap();
+        cubby_db::family::migrate_family(&mut c).unwrap();
+        c.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             INSERT INTO budget_grants(id,child_id,granted_at,expires_at,minutes,videos,granted_by)
+             VALUES ('old','k',0,100,5,0,'p'),('new','k',0,1000,5,0,'p');",
+        )
+        .unwrap();
+        assert!(reverse_grant(&c, "k", "old", "p", 500).unwrap());
+        assert!(reverse_grant(&c, "k", "new", "p", 500).unwrap());
+        assert!(reverse_grant(&c, "k", "new", "q", 600).unwrap());
+        assert!(!reverse_grant(&c, "other", "new", "p", 500).unwrap());
+        let rows: Vec<(String, String)> = c
+            .prepare("SELECT grant_id, reversed_by FROM budget_grant_reversals")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, [("new".to_string(), "p".to_string())]);
     }
 }

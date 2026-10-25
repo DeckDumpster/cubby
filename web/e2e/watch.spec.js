@@ -50,7 +50,7 @@ const FAKE_PLAYER = () => {
 	window.__state = (s) => window.__players.at(-1).opts.events.onStateChange({ data: s });
 };
 
-async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [] } = {}) {
+async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200 } = {}) {
 	const calls = [];
 	await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
 	await page.addInitScript(FAKE_PLAYER);
@@ -59,6 +59,7 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		const path = new URL(req.url()).pathname;
 		calls.push({ path, body: req.postDataJSON?.() ?? null });
 		const json = (data) => route.fulfill({ json: data });
+		if (path.includes('/playlists/')) return json({ ok: true });
 		if (path.endsWith('/home')) return json(HOME);
 		if (path.endsWith('/recent')) {
 			const q = new URL(req.url()).searchParams;
@@ -71,7 +72,7 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		if (path.endsWith('/end')) return json({ ok: true });
 		if (path.endsWith('/next')) return json(NEXT);
 		if (path.endsWith('/search')) return json({ tiles: [tile('v9', 'Found it')] });
-		if (path.endsWith('/request')) return json({ ok: true });
+		if (path.endsWith('/request')) return requestStatus === 200 ? json({ ok: true }) : route.fulfill({ status: requestStatus, json: {} });
 		return route.fulfill({ status: 404, json: {} });
 	});
 	return calls;
@@ -151,6 +152,16 @@ test('like and more-from-channel post requests', async ({ page }) => {
 		{ kind: 'like', youtube_id: 'v1' },
 		{ kind: 'more-from-channel', youtube_id: 'v1' }
 	]);
+});
+
+test('a failed request reverts the button and says so gently', async ({ page }) => {
+	await setup(page, { requestStatus: 500 });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await page.getByRole('button', { name: /I like this/ }).click();
+	await expect(page.getByText("Couldn't send — try again")).toBeVisible();
+	await expect(page.getByRole('button', { name: /I like this/ })).toBeEnabled();
+	await expect(page.getByText('Asked!')).toHaveCount(0);
 });
 
 test('search shows only what the search API returns', async ({ page }) => {
@@ -467,3 +478,124 @@ for (const [name, size] of [['ipad', { width: 820, height: 1180 }], ['phone', { 
 		await expect(page.getByTestId('recent-row')).toBeVisible();
 	});
 }
+
+// sp-gqmccx: the child's notices live in Cubby's own area, never over the player.
+const OUT = process.env.SHOTS_DIR ?? 'screenshots';
+
+async function routeBeats(page, minutes) {
+	let n = 0;
+	await page.route('**/api/child/grant/*/beat', (r) =>
+		r.fulfill({ json: { remaining: { videos: 2, minutes: minutes[Math.min(n++, minutes.length - 1)] }, stop: false } })
+	);
+}
+
+test('starting with a 3-video budget says "2 more videos"; the last allowed start says "This is the last video"', async ({ page }) => {
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 3, minutes: null } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.getByTestId('notice')).toHaveText(/You can watch 2 more videos after this one\./);
+	await page.evaluate(() => window.__state(1));
+	await page.screenshot({ path: `${OUT}/notice-start.png` });
+});
+
+test('the last allowed start shows "This is the last video"', async ({ page }) => {
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 1, minutes: null } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.getByTestId('notice')).toContainText('This is the last video.');
+});
+
+test('unlimited limits show no notice', async ({ page }) => {
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: null, minutes: null } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	await expect(page.getByTestId('notice')).toHaveCount(0);
+});
+
+test('with 6 minutes left, playing past the 5-minute mark shows the stop nudge once, then 1 minute', async ({ page }) => {
+	await page.clock.install();
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 5, minutes: 6 } } });
+	await routeBeats(page, [5.8, 4.9, 4.7, 4.5, 0.9, 0.8]);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	const notice = page.getByTestId('notice');
+	await expect(notice).toContainText('4 more videos');
+	await page.evaluate(() => window.__state(1));
+	await page.clock.runFor(10_100);
+	await expect(notice).toContainText('4 more videos');
+	await page.clock.runFor(10_100);
+	await expect(notice).toHaveText(/After 5 more minutes, videos will stop\./);
+	await page.screenshot({ path: `${OUT}/notice-nudge.png` });
+	await page.clock.runFor(20_200);
+	await expect(notice).toHaveText(/After 5 more minutes/);
+	await page.clock.runFor(10_100);
+	await expect(notice).toHaveText(/After 1 more minute, videos will stop\./);
+});
+
+test('the daily window closing counts as time left', async ({ page }) => {
+	await page.clock.install();
+	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 5, minutes: null, window_left_s: 240 } } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.getByTestId('notice')).toContainText('After 4 more minutes, videos will stop.');
+});
+
+for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { width: 820, height: 1180 }]]) {
+	test(`a notice is never drawn over the player at ${name} width, and stays in fullscreen`, async ({ page }) => {
+		await setup(page, { play: { grant_id: 'g1', remaining: { videos: 3, minutes: null } } });
+		await page.setViewportSize(size);
+		await page.goto('/watch');
+		await page.getByRole('button', { name: /First video/ }).click();
+		await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+		await page.evaluate(() => window.__state(1));
+		const n = await page.getByTestId('notice').boundingBox();
+		const p = await page.locator('.player').boundingBox();
+		expect(n.y).toBeGreaterThanOrEqual(p.y + p.height - 1);
+		await page.screenshot({ path: `${OUT}/notice-${name}.png` });
+		await page.getByTestId('fullscreen').click();
+		await expect(page.getByTestId('notice')).toBeVisible();
+		await expect.poll(async () => {
+			const n2 = await page.getByTestId('notice').boundingBox();
+			const p2 = await page.locator('.player').boundingBox();
+			return n2.y - (p2.y + p2.height - 1);
+		}).toBeGreaterThanOrEqual(0);
+		await page.screenshot({ path: `${OUT}/notice-${name}-fullscreen.png` });
+	});
+}
+
+test('every tile has a Watch later control that saves and unsaves, and the row shows the saved videos', async ({ page }) => {
+	const calls = await setup(page);
+	await page.route('**/api/child/home', (route) =>
+		route.fulfill({ json: { ...HOME, saved: ['v2'], watch_later: [tile('v2', 'Second video')] } })
+	);
+	await page.goto('/watch');
+	const row = page.getByTestId('watch-later-row');
+	await expect(row).toContainText('Second video');
+	const first = page.locator('.tilewrap', { hasText: 'First video' }).getByTestId('save-later');
+	await expect(first).toContainText('Later');
+	await first.click();
+	await expect(first).toContainText('Saved');
+	expect(calls.some((c) => c.path.endsWith('/playlists/watch_later/items/v1'))).toBe(true);
+	await page.screenshot({ path: test.info().outputPath('landing.png'), fullPage: true });
+	await first.click();
+	await expect(first).toContainText('Later');
+});
+
+test('a refusal offers Save it for later in one tap', async ({ page }) => {
+	const calls = await setup(page, { play: { refused: 'out-of-minutes', next_start: null } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).first().click();
+	await page.getByTestId('save-for-later').click();
+	await expect(page.getByTestId('saved-note')).toBeVisible();
+	expect(calls.some((c) => c.path.endsWith('/playlists/watch_later/items/v1'))).toBe(true);
+	await page.screenshot({ path: test.info().outputPath('refusal.png') });
+});
+
+test('a video that is not allowed cannot be saved from the refusal card', async ({ page }) => {
+	await setup(page, { play: { refused: 'not-allowed', next_start: null } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).first().click();
+	await expect(page.getByTestId('refusal')).toBeVisible();
+	await expect(page.getByTestId('save-for-later')).toHaveCount(0);
+});
