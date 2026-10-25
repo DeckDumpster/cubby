@@ -458,6 +458,7 @@ for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { w
 		await page.setViewportSize(size);
 		await page.goto('/watch');
 		await page.getByRole('button', { name: /First video/ }).click();
+		await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 		await page.evaluate(() => window.__state(1));
 		const n = await page.getByTestId('notice').boundingBox();
 		const p = await page.locator('.player').boundingBox();
