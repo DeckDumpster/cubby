@@ -48,7 +48,7 @@ test('the landing page has a Channels row linking to each channel page', async (
 	await row.getByRole('link', { name: /Trains/ }).click();
 	await expect(page).toHaveURL(/channel=UC1/);
 	await expect(page.getByRole('heading', { name: 'Trains' })).toBeVisible();
-	await expect(page.getByRole('button', { name: /First video/ })).toBeVisible();
+	await expect(page.getByRole('link', { name: /First video/ })).toBeVisible();
 });
 
 test('the request button files one request and becomes the waiting state', async ({ page }, info) => {
@@ -67,7 +67,7 @@ test('the request button files one request and becomes the waiting state', async
 test('an imported channel shows no request button', async ({ page }) => {
 	await setup(page, { canRequest: false });
 	await page.goto('/watch?channel=UC1');
-	await expect(page.getByRole('button', { name: /First video/ })).toBeVisible();
+	await expect(page.getByRole('link', { name: /First video/ })).toBeVisible();
 	await expect(page.getByTestId('channel-ask')).toHaveCount(0);
 	await expect(page.getByTestId('channel-waiting')).toHaveCount(0);
 });
