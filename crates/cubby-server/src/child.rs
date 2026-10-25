@@ -316,7 +316,10 @@ async fn request_route(
     Json(b): Json<RequestBody>,
 ) -> Result<Json<Value>, ApiError> {
     if !matches!(b.kind.as_str(), "like" | "more-from-channel") {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "unknown request kind"));
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "unknown request kind",
+        ));
     }
     let conn = open_own(&state, &family_id)?;
     let id = cubby_db::parent::add_request(
