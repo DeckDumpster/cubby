@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PolicyRules from '$lib/PolicyRules.svelte';
 	import Library from '$lib/Library.svelte';
 	import { getParent } from '$lib/parentState.svelte.js';
 
@@ -25,6 +26,7 @@
 			<li>
 				<span class="grow"><b class="pill">{p.kind}</b> {p.title || p.youtube_id}{#if p.pending} <b class="pill">pending</b>{/if} <small>— {ps.childName(p.child_id)}</small></span>
 				<button class="danger" onclick={() => ps.act('DELETE', `/api/parent/policies/${p.id}`)}>Remove</button>
+				{#if p.kind !== 'video'}<PolicyRules policy={p} />{/if}
 			</li>
 		{:else}<li class="empty">Nothing is allowed yet, so children see nothing.</li>{/each}
 	</ul>

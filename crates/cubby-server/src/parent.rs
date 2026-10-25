@@ -32,6 +32,11 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/parent/children/{id}/history", get(child_history))
         .route("/api/parent/policies", get(policies).post(add_policy))
         .route("/api/parent/policies/preview", post(preview))
+        .route("/api/parent/policies/{id}/rules", put(set_rules))
+        .route(
+            "/api/parent/policies/{id}/rules/preview",
+            post(preview_rules),
+        )
         .route("/api/parent/policies/{id}", delete(remove_policy))
         .route("/api/parent/review", get(review))
         .route("/api/parent/library", get(library))
@@ -232,22 +237,116 @@ async fn policies(
     State(s): State<Arc<AppState>>,
     Extension(f): Extension<ParentOf>,
 ) -> Result<Json<Value>> {
-    let rows = store::list_policies(&conn(&s, &f)?)?;
-    Ok(Json(Value::Array(
-        rows.into_iter()
-            .map(|p| {
-                json!({"id": p.id, "kind": p.kind, "youtube_id": p.youtube_id,
-                    "child_id": p.child_id, "added_at": p.added_at, "title": p.title,
-                    "pending": p.pending})
-            })
-            .collect(),
-    )))
+    let c = conn(&s, &f)?;
+    let rows = store::list_policies(&c)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for p in rows {
+        let mut j = json!({"id": p.id, "kind": p.kind, "youtube_id": p.youtube_id,
+            "child_id": p.child_id, "added_at": p.added_at, "title": p.title,
+            "pending": p.pending});
+        if p.kind != "video" {
+            let rules = store::get_rules(&c, &p.id)?;
+            j["rules"] = rules_json(&rules);
+            let n = store::rule_counts(&c, &p.id, 0)?;
+            j["allowed_count"] = json!(n.allowed);
+            j["excluded_count"] = json!(n.excluded);
+        }
+        out.push(j);
+    }
+    Ok(Json(Value::Array(out)))
+}
+
+/// The wire form of a policy's filter rules; durations are minutes.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RulesBody {
+    exclude_shorts: bool,
+    min_minutes: Option<f64>,
+    max_minutes: Option<f64>,
+    title_has: Vec<String>,
+    title_lacks: Vec<String>,
+}
+
+impl RulesBody {
+    fn rules(&self) -> Result<store::Rules> {
+        let secs = |m: Option<f64>| -> Result<Option<i64>> {
+            match m {
+                None => Ok(None),
+                Some(m) if m.is_finite() && (0.0..=1e6).contains(&m) => {
+                    Ok(Some((m * 60.0).round() as i64))
+                }
+                Some(_) => Err(bad("a duration must be a number of minutes, zero or more")),
+            }
+        };
+        Ok(store::Rules {
+            exclude_shorts: self.exclude_shorts,
+            min_s: secs(self.min_minutes)?,
+            max_s: secs(self.max_minutes)?,
+            title_has: self.title_has.clone(),
+            title_lacks: self.title_lacks.clone(),
+        }
+        .normalised())
+    }
+}
+
+fn rules_json(r: &store::Rules) -> Value {
+    json!({"exclude_shorts": r.exclude_shorts,
+        "min_minutes": r.min_s.map(|s| s as f64 / 60.0),
+        "max_minutes": r.max_s.map(|s| s as f64 / 60.0),
+        "title_has": r.title_has, "title_lacks": r.title_lacks})
+}
+
+fn counts_json(n: &store::RuleCounts) -> Value {
+    json!({"allowed": n.allowed, "excluded": n.excluded,
+        "excluded_videos": n.excluded_videos.iter().map(|v| json!({
+            "youtube_id": v.youtube_id, "title": v.title, "duration_s": v.duration_s}))
+            .collect::<Vec<_>>()})
+}
+
+fn invalid(e: DbError) -> ApiError {
+    match e {
+        DbError::Invalid(m) => bad(&m),
+        e => e.into(),
+    }
+}
+
+/// Saves a channel or playlist policy's rules. They bind every current video and every upload
+/// the worker brings in later: `playable` reads them at query time.
+async fn set_rules(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    Path(id): Path<String>,
+    Json(b): Json<RulesBody>,
+) -> Result<Json<Value>> {
+    let c = conn(&s, &f)?;
+    if !store::set_rules(&c, &id, &b.rules()?).map_err(invalid)? {
+        return Err(not_found("channel or playlist policy"));
+    }
+    Ok(Json(
+        json!({"rules": rules_json(&store::get_rules(&c, &id)?),
+        "counts": counts_json(&store::rule_counts(&c, &id, 200)?)}),
+    ))
+}
+
+/// The live allowed/excluded count for rules the parent has not saved yet.
+async fn preview_rules(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    Path(id): Path<String>,
+    Json(b): Json<RulesBody>,
+) -> Result<Json<Value>> {
+    let n = store::preview_rules(&conn(&s, &f)?, &id, &b.rules()?, 200)
+        .map_err(invalid)?
+        .ok_or_else(|| not_found("channel or playlist policy"))?;
+    Ok(Json(counts_json(&n)))
 }
 
 #[derive(Deserialize)]
 struct UrlBody {
     url: String,
     child_id: Option<String>,
+    /// Filter rules to set on a new channel or playlist policy.
+    rules: Option<RulesBody>,
 }
 
 /// A pasted link's policy with a channel named by handle or legacy name turned into its `UC` id.
@@ -339,6 +438,11 @@ async fn add_policy(
         unix_now(),
         r.label.as_deref(),
     )?;
+    if let Some(rules) = &b.rules
+        && matches!(r.kind, "channel" | "playlist")
+    {
+        store::set_rules(&c, &id, &rules.rules()?).map_err(invalid)?;
+    }
     // Ingest before answering so the child sees the video at once; a failure here leaves the
     // policy pending for the worker's next pass.
     if let Some(ingest) = s.ingest.clone() {

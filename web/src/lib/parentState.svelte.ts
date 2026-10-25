@@ -18,7 +18,24 @@ export type Child = {
 		daily_windows: [string, string][];
 	};
 };
-export type Policy = { id: string; kind: string; youtube_id: string; child_id: string | null; title: string; pending?: boolean };
+export type Rules = {
+	exclude_shorts: boolean;
+	min_minutes: number | null;
+	max_minutes: number | null;
+	title_has: string[];
+	title_lacks: string[];
+};
+export type Policy = {
+	id: string;
+	kind: string;
+	youtube_id: string;
+	child_id: string | null;
+	title: string;
+	pending?: boolean;
+	rules?: Rules;
+	allowed_count?: number;
+	excluded_count?: number;
+};
 export type Req = { id: string; child_name: string; kind: string; title: string; channel_title: string; youtube_id: string };
 export type Grant = { id: string; title: string; youtube_id: string; granted_at: number; watched_s: number; charge: number; end_reason: string | null; thumb?: string | null };
 

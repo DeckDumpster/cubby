@@ -271,6 +271,211 @@ pub fn approve_video(conn: &Connection, youtube_id: &str, now: i64) -> Result<()
     Ok(())
 }
 
+/// What a channel or playlist policy lets through. Every field is optional; an all-default value
+/// is "no rules". A video is playable through the policy only if it passes every rule set; the
+/// `rule_failed` view is the one definition of "passes", read by `playable` and the parent lists.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Rules {
+    /// Drop Shorts: a video of [`SHORT_MAX_S`] seconds or less.
+    pub exclude_shorts: bool,
+    pub min_s: Option<i64>,
+    pub max_s: Option<i64>,
+    /// The title must contain at least one of these (case-insensitive).
+    pub title_has: Vec<String>,
+    /// The title must contain none of these (case-insensitive).
+    pub title_lacks: Vec<String>,
+}
+
+/// The longest a video can be and count as a Short. The Data API carries no Shorts flag, no
+/// aspect ratio and no URL form, so duration is the only signal in the metadata Cubby fetches.
+/// Keep in step with `family_v6.sql`.
+pub const SHORT_MAX_S: i64 = 60;
+
+impl Rules {
+    pub fn is_empty(&self) -> bool {
+        *self == Rules::default()
+    }
+
+    /// Lowercased, trimmed, de-duplicated words; blanks dropped.
+    pub fn normalised(&self) -> Rules {
+        let words = |w: &[String]| {
+            let mut out: Vec<String> = w
+                .iter()
+                .map(|x| x.trim().to_lowercase())
+                .filter(|x| !x.is_empty())
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        };
+        Rules {
+            exclude_shorts: self.exclude_shorts,
+            min_s: self.min_s,
+            max_s: self.max_s,
+            title_has: words(&self.title_has),
+            title_lacks: words(&self.title_lacks),
+        }
+    }
+}
+
+/// Saves the rules of a live channel or playlist policy (an empty value clears them). False when
+/// there is no such policy or it is a single-video policy, which has nothing to filter.
+pub fn set_rules(conn: &Connection, policy: &str, rules: &Rules) -> Result<bool> {
+    let kind: Option<String> = conn
+        .query_row(
+            "SELECT kind FROM allow_policies WHERE id=?1 AND removed_at IS NULL",
+            [policy],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if !matches!(kind.as_deref(), Some("channel" | "playlist")) {
+        return Ok(false);
+    }
+    if let (Some(lo), Some(hi)) = (rules.min_s, rules.max_s)
+        && lo > hi
+    {
+        return Err(DbError::Invalid(
+            "the minimum duration is above the maximum".to_string(),
+        ));
+    }
+    if rules.min_s.is_some_and(|m| m < 0) || rules.max_s.is_some_and(|m| m < 0) {
+        return Err(DbError::Invalid(
+            "a duration cannot be negative".to_string(),
+        ));
+    }
+    let r = rules.normalised();
+    conn.execute_batch("SAVEPOINT set_rules")?;
+    let saved = (|| -> Result<()> {
+        conn.execute("DELETE FROM policy_rules WHERE policy_id=?1", [policy])?;
+        conn.execute("DELETE FROM policy_rule_words WHERE policy_id=?1", [policy])?;
+        if !r.is_empty() {
+            conn.execute(
+            "INSERT INTO policy_rules(policy_id,exclude_shorts,min_s,max_s) VALUES (?1,?2,?3,?4)",
+            params![policy, r.exclude_shorts, r.min_s, r.max_s],
+        )?;
+            for (mode, words) in [("has", &r.title_has), ("lacks", &r.title_lacks)] {
+                for w in words {
+                    conn.execute(
+                        "INSERT INTO policy_rule_words(policy_id,mode,word) VALUES (?1,?2,?3)",
+                        params![policy, mode, w],
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    })();
+    if saved.is_err() {
+        conn.execute_batch("ROLLBACK TO set_rules")?;
+    }
+    conn.execute_batch("RELEASE set_rules")?;
+    saved?;
+    Ok(true)
+}
+
+pub fn get_rules(conn: &Connection, policy: &str) -> Result<Rules> {
+    let mut rules = conn
+        .query_row(
+            "SELECT exclude_shorts,min_s,max_s FROM policy_rules WHERE policy_id=?1",
+            [policy],
+            |r| {
+                Ok(Rules {
+                    exclude_shorts: r.get(0)?,
+                    min_s: r.get(1)?,
+                    max_s: r.get(2)?,
+                    ..Rules::default()
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or_default();
+    let mut s =
+        conn.prepare("SELECT mode,word FROM policy_rule_words WHERE policy_id=?1 ORDER BY word")?;
+    for row in s.query_map([policy], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })? {
+        let (mode, word) = row?;
+        if mode == "has" {
+            rules.title_has.push(word);
+        } else {
+            rules.title_lacks.push(word);
+        }
+    }
+    Ok(rules)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExcludedVideo {
+    pub youtube_id: String,
+    pub title: String,
+    pub duration_s: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuleCounts {
+    pub allowed: i64,
+    pub excluded: i64,
+    /// Up to the requested number of excluded videos, longest title-sorted first page.
+    pub excluded_videos: Vec<ExcludedVideo>,
+}
+
+/// How many of a channel or playlist policy's videos the policy's saved rules allow and exclude,
+/// and the first `limit` excluded ones. Blocked and unavailable videos are in neither count.
+pub fn rule_counts(conn: &Connection, policy: &str, limit: usize) -> Result<RuleCounts> {
+    let universe = "SELECT DISTINCT v.youtube_id AS youtube_id, v.title AS title, v.duration_s AS d
+         FROM allowed_videos a JOIN videos v ON v.youtube_id=a.youtube_id
+         WHERE a.policy_id=?1 AND a.state IN ('auto-allowed','approved')
+           AND v.unavailable_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM allowed_videos b WHERE b.youtube_id=a.youtube_id
+                AND b.state='blocked' AND (b.child_id IS NULL OR b.child_id IS a.child_id))";
+    let excluded_where = "EXISTS (SELECT 1 FROM rule_failed f WHERE f.policy_id=?1
+                AND f.youtube_id=u.youtube_id)";
+    let (total, excluded): (i64, i64) = conn.query_row(
+        &format!(
+            "WITH u AS ({universe}) SELECT COUNT(*), COALESCE(SUM({excluded_where}),0) FROM u"
+        ),
+        [policy],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let mut s = conn.prepare(&format!(
+        "WITH u AS ({universe}) SELECT youtube_id, title, d FROM u WHERE {excluded_where}
+         ORDER BY title COLLATE NOCASE, youtube_id LIMIT ?2"
+    ))?;
+    let excluded_videos = s
+        .query_map(params![policy, limit as i64], |r| {
+            Ok(ExcludedVideo {
+                youtube_id: r.get(0)?,
+                title: r.get(1)?,
+                duration_s: r.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(RuleCounts {
+        allowed: total - excluded,
+        excluded,
+        excluded_videos,
+    })
+}
+
+/// [`rule_counts`] as if `rules` were saved, without saving them: the rules are written, counted
+/// through the same view that enforces them, and rolled back. None when the policy takes no rules.
+pub fn preview_rules(
+    conn: &Connection,
+    policy: &str,
+    rules: &Rules,
+    limit: usize,
+) -> Result<Option<RuleCounts>> {
+    conn.execute_batch("SAVEPOINT rules_preview")?;
+    let out = set_rules(conn, policy, rules).and_then(|ok| {
+        if ok {
+            rule_counts(conn, policy, limit).map(Some)
+        } else {
+            Ok(None)
+        }
+    });
+    conn.execute_batch("ROLLBACK TO rules_preview; RELEASE rules_preview")?;
+    out
+}
+
 /// "Added by your policies": auto-allowed videos still allowed and not yet approved, with the
 /// policy that let them in. `channel` filters by channel id.
 pub fn auto_allowed(conn: &Connection, channel: Option<&str>) -> Result<Vec<AutoItem>> {
@@ -286,6 +491,8 @@ pub fn auto_allowed(conn: &Connection, channel: Option<&str>) -> Result<Vec<Auto
                 AND b.child_id IS a.child_id AND b.state='approved')
            AND NOT EXISTS (SELECT 1 FROM allowed_videos b WHERE b.youtube_id=a.youtube_id
                 AND b.state='blocked' AND (b.child_id IS NULL OR b.child_id IS a.child_id))
+           AND NOT EXISTS (SELECT 1 FROM rule_failed f WHERE f.policy_id=a.policy_id
+                AND f.youtube_id=a.youtube_id)
          GROUP BY v.youtube_id, a.child_id
          ORDER BY a.changed_at DESC, v.youtube_id",
     )?;
@@ -363,6 +570,8 @@ const LIBRARY_ENTRIES: &str = "WITH e AS (
                 AND b.child_id IS a.child_id AND b.state='approved'))
       AND NOT EXISTS (SELECT 1 FROM allowed_videos b WHERE b.youtube_id=a.youtube_id
                 AND b.state='blocked' AND (b.child_id IS NULL OR b.child_id IS a.child_id))
+      AND NOT EXISTS (SELECT 1 FROM rule_failed f WHERE f.policy_id=a.policy_id
+                AND f.youtube_id=a.youtube_id)
       AND (?3 IS NULL OR v.rowid IN (SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?3))
 )";
 
@@ -968,5 +1177,166 @@ mod tests {
         let rev = LibraryFilter { review: true, ..f };
         assert_eq!(library_groups(&c, &rev).unwrap().len(), 1);
         assert!(library_videos(&c, &rev, "ch1", None, "bogus", 0, 1).is_err());
+    }
+
+    /// A channel holding a 45 s short, a 25-minute episode and a 90-minute compilation.
+    fn rule_channel(c: &Connection) -> String {
+        c.execute_batch(
+            "INSERT INTO videos(youtube_id,title,channel_id,channel_title,duration_s,fetched_at) VALUES
+               ('short','Quick clip','chr','R',45,1),
+               ('ep','Episode 4','chr','R',1500,1),
+               ('comp','Episode 1-9 compilation','chr','R',5400,1);",
+        )
+        .unwrap();
+        add_policy(c, "channel", "chr", None, 5).unwrap()
+    }
+
+    fn no_shorts_under_30() -> Rules {
+        Rules {
+            exclude_shorts: true,
+            max_s: Some(1800),
+            ..Rules::default()
+        }
+    }
+
+    #[test]
+    fn no_shorts_and_under_thirty_minutes_allows_only_the_episode() {
+        let c = mem();
+        let p = rule_channel(&c);
+        assert_eq!(playable(&c, "a"), ["comp", "ep", "short"]);
+        set_rules(&c, &p, &no_shorts_under_30()).unwrap();
+        assert_eq!(playable(&c, "a"), ["ep"]);
+    }
+
+    #[test]
+    fn a_new_upload_is_judged_by_the_rules_when_it_arrives() {
+        let c = mem();
+        let p = rule_channel(&c);
+        set_rules(&c, &p, &no_shorts_under_30()).unwrap();
+        c.execute_batch(
+            "INSERT INTO videos(youtube_id,title,channel_id,channel_title,duration_s,fetched_at) VALUES
+               ('new-ok','Episode 5','chr','R',1200,9),('new-long','Movie night','chr','R',7200,9),
+               ('new-short','Another clip','chr','R',30,9);
+             INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES
+               ('new-ok',NULL,'%P','auto-allowed',9),('new-long',NULL,'%P','auto-allowed',9),
+               ('new-short',NULL,'%P','auto-allowed',9);"
+                .replace("%P", &p)
+                .as_str(),
+        )
+        .unwrap();
+        assert_eq!(playable(&c, "a"), ["ep", "new-ok"]);
+    }
+
+    #[test]
+    fn a_video_with_unknown_duration_fails_a_duration_rule() {
+        let c = mem();
+        let p = add_policy(&c, "channel", "ch1", None, 5).unwrap();
+        set_rules(&c, &p, &no_shorts_under_30()).unwrap();
+        assert!(playable(&c, "a").is_empty());
+    }
+
+    #[test]
+    fn minimum_duration_and_title_words_filter() {
+        let c = mem();
+        let p = rule_channel(&c);
+        let rules = Rules {
+            min_s: Some(600),
+            title_lacks: vec!["compilation".into()],
+            ..Rules::default()
+        };
+        set_rules(&c, &p, &rules).unwrap();
+        assert_eq!(playable(&c, "a"), ["ep"]);
+        let rules = Rules {
+            title_has: vec!["QUICK".into(), "nothing".into()],
+            ..Rules::default()
+        };
+        set_rules(&c, &p, &rules).unwrap();
+        assert_eq!(playable(&c, "a"), ["short"]);
+    }
+
+    #[test]
+    fn rules_bind_only_their_own_policy() {
+        let c = mem();
+        let p = rule_channel(&c);
+        set_rules(&c, &p, &no_shorts_under_30()).unwrap();
+        add_policy(&c, "video", "comp", None, 6).unwrap();
+        assert_eq!(playable(&c, "a"), ["comp", "ep"]);
+    }
+
+    #[test]
+    fn an_explicit_allow_beats_the_rules_and_a_block_beats_the_allow() {
+        let c = mem();
+        let p = rule_channel(&c);
+        set_rules(&c, &p, &no_shorts_under_30()).unwrap();
+        add_policy(&c, "video", "short", None, 6).unwrap();
+        assert_eq!(playable(&c, "a"), ["ep", "short"]);
+        block_video(&c, "ep", None, 7).unwrap();
+        assert_eq!(playable(&c, "a"), ["short"]);
+    }
+
+    #[test]
+    fn excluded_videos_leave_the_review_list_and_the_library() {
+        let c = mem();
+        let p = rule_channel(&c);
+        set_rules(&c, &p, &no_shorts_under_30()).unwrap();
+        let ids: Vec<_> = auto_allowed(&c, Some("chr"))
+            .unwrap()
+            .into_iter()
+            .map(|i| i.youtube_id)
+            .collect();
+        assert_eq!(ids, ["ep"]);
+        let g = library_groups(&c, &LibraryFilter::default()).unwrap();
+        assert_eq!(g.iter().find(|g| g.key == "chr").unwrap().count, 1);
+    }
+
+    #[test]
+    fn clearing_the_rules_allows_everything_again() {
+        let c = mem();
+        let p = rule_channel(&c);
+        set_rules(&c, &p, &no_shorts_under_30()).unwrap();
+        set_rules(&c, &p, &Rules::default()).unwrap();
+        assert_eq!(playable(&c, "a"), ["comp", "ep", "short"]);
+        assert_eq!(get_rules(&c, &p).unwrap(), Rules::default());
+    }
+
+    #[test]
+    fn rules_round_trip_and_only_channel_and_playlist_policies_take_them() {
+        let c = mem();
+        let p = rule_channel(&c);
+        let r = Rules {
+            exclude_shorts: true,
+            min_s: Some(60),
+            max_s: Some(1800),
+            title_has: vec!["ep".into()],
+            title_lacks: vec!["compilation".into(), "mix".into()],
+        };
+        assert!(set_rules(&c, &p, &r).unwrap());
+        assert_eq!(get_rules(&c, &p).unwrap(), r);
+        let v = add_policy(&c, "video", "ep", None, 6).unwrap();
+        assert!(!set_rules(&c, &v, &r).unwrap());
+        assert!(!set_rules(&c, "nope", &r).unwrap());
+    }
+
+    #[test]
+    fn the_preview_counts_without_saving() {
+        let c = mem();
+        let p = rule_channel(&c);
+        let pv = preview_rules(&c, &p, &no_shorts_under_30(), 10)
+            .unwrap()
+            .unwrap();
+        assert_eq!((pv.allowed, pv.excluded), (1, 2));
+        let mut ex: Vec<_> = pv
+            .excluded_videos
+            .iter()
+            .map(|v| v.youtube_id.as_str())
+            .collect();
+        ex.sort();
+        assert_eq!(ex, ["comp", "short"]);
+        assert_eq!(get_rules(&c, &p).unwrap(), Rules::default());
+        assert_eq!(playable(&c, "a"), ["comp", "ep", "short"]);
+        let pv = preview_rules(&c, &p, &no_shorts_under_30(), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!((pv.excluded, pv.excluded_videos.len()), (2, 1));
     }
 }

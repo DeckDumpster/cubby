@@ -152,3 +152,41 @@ export function dayGroups(grants, tz, now) {
 	}
 	return [...out.values()];
 }
+
+/**
+ * "trailer, compilation" to ["trailer", "compilation"]: split on commas, trimmed, blanks dropped.
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function wordsFromText(text) {
+	return text.split(',').map((w) => w.trim()).filter(Boolean);
+}
+
+/**
+ * A minutes field to a number, null when empty, undefined when it is not a number of minutes.
+ * @param {string} text
+ * @returns {number | null | undefined}
+ */
+export function minutesFromText(text) {
+	if (!text.trim()) return null;
+	const n = Number(text);
+	return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * The form's fields as the rules request body; null when a minutes field does not parse.
+ * @param {{ exclude_shorts: boolean, min: string, max: string, has: string, lacks: string }} f
+ */
+export function rulesBody(f) {
+	const min_minutes = minutesFromText(f.min);
+	const max_minutes = minutesFromText(f.max);
+	if (min_minutes === undefined || max_minutes === undefined) return null;
+	if (min_minutes !== null && max_minutes !== null && min_minutes > max_minutes) return null;
+	return {
+		exclude_shorts: f.exclude_shorts,
+		min_minutes,
+		max_minutes,
+		title_has: wordsFromText(f.has),
+		title_lacks: wordsFromText(f.lacks)
+	};
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { windowsFromText, windowsToText, fmtWatched, budgetBody, requestLabel } from '../src/lib/parent.js';
+import { windowsFromText, windowsToText, fmtWatched, budgetBody, requestLabel, rulesBody, wordsFromText } from '../src/lib/parent.js';
 
 test('windows text round-trips', () => {
 	const w = windowsFromText('07:00-12:00, 14:00-19:30');
@@ -51,4 +51,25 @@ test('the minutes per video equivalent ride the budget body; zero and junk are r
 	assert.equal(budgetBody(f)?.ve_minutes, 10);
 	assert.equal(budgetBody({ ...f, veMinutes: '0' }), null);
 	assert.equal(budgetBody({ ...f, veMinutes: 'x' }), null);
+});
+
+const rf = { exclude_shorts: true, min: '', max: '30', has: '', lacks: 'compilation, , Mix ' };
+
+test('rulesBody turns the form into the request body', () => {
+	assert.deepEqual(rulesBody(rf), {
+		exclude_shorts: true,
+		min_minutes: null,
+		max_minutes: 30,
+		title_has: [],
+		title_lacks: ['compilation', 'Mix']
+	});
+});
+
+test('rulesBody refuses a bad or inverted range', () => {
+	assert.equal(rulesBody({ ...rf, max: 'abc' }), null);
+	assert.equal(rulesBody({ ...rf, min: '40' }), null);
+});
+
+test('wordsFromText splits on commas', () => {
+	assert.deepEqual(wordsFromText(' a,b ,, '), ['a', 'b']);
 });

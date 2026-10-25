@@ -697,3 +697,123 @@ async fn progress_says_no_limit_for_unlimited_budgets() {
     assert!(p[0]["minutes"]["limit"].is_null());
     assert!(p[0]["resets_at"].is_null());
 }
+
+fn tile_ids(v: &Value) -> Vec<String> {
+    let mut out = vec![];
+    fn walk(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::Object(m) => {
+                if let Some(id) = m.get("youtube_id").or(m.get("id")).and_then(Value::as_str) {
+                    out.push(id.to_string());
+                }
+                m.values().for_each(|x| walk(x, out));
+            }
+            Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    walk(v, &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+#[tokio::test]
+async fn channel_rules_allow_only_the_episode_count_live_and_judge_new_uploads() {
+    let e = env().await;
+    e.family()
+        .execute_batch(
+            "INSERT INTO videos(youtube_id,title,channel_id,channel_title,duration_s,fetched_at) VALUES
+             ('short','Clip train','chr','Rails',45,1),('ep','Episode train','chr','Rails',1500,2),
+             ('comp','Train compilation','chr','Rails',5400,3);",
+        )
+        .unwrap();
+    let (_, tok) = e.child_with_device().await;
+    let (s, p) = e
+        .parent(
+            "POST",
+            "/api/parent/policies",
+            Some(json!({"url": "https://www.youtube.com/channel/chr"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    let pid = p["id"].as_str().unwrap().to_string();
+    let rules = json!({"exclude_shorts": true, "max_minutes": 30});
+
+    // The live count before saving, with the excluded list; nothing changes for the child yet.
+    let (s, n) = e
+        .parent(
+            "POST",
+            &format!("/api/parent/policies/{pid}/rules/preview"),
+            Some(rules.clone()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{n}");
+    assert_eq!(
+        (n["allowed"].clone(), n["excluded"].clone()),
+        (json!(1), json!(2))
+    );
+    assert_eq!(tile_ids(&n["excluded_videos"]), ["comp", "short"]);
+    assert!(granted(&e.child_play(&tok, "short").await));
+
+    let (s, saved) = e
+        .parent(
+            "PUT",
+            &format!("/api/parent/policies/{pid}/rules"),
+            Some(rules),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{saved}");
+    assert_eq!(saved["counts"]["excluded"], 2);
+    let (_, pols) = e.parent("GET", "/api/parent/policies", None).await;
+    assert_eq!(pols[0]["rules"]["max_minutes"], 30.0);
+    assert_eq!(pols[0]["excluded_count"], 2);
+
+    // The child no longer sees or plays the excluded videos, in the grid or in search.
+    let get = |path: &'static str| {
+        let r = Request::get(path)
+            .header("authorization", format!("Bearer {tok}"))
+            .body(Body::empty())
+            .unwrap();
+        e.call(r)
+    };
+    assert_eq!(tile_ids(&get("/api/child/home").await.1), ["ep"]);
+    assert_eq!(tile_ids(&get("/api/child/search?q=train").await.1), ["ep"]);
+    assert_eq!(e.child_play(&tok, "comp").await["refused"], "not-allowed");
+    assert!(granted(&e.child_play(&tok, "ep").await));
+
+    // A later upload is judged when it arrives: the matching one shows, the other stays hidden.
+    e.family()
+        .execute_batch(&format!(
+            "INSERT INTO videos(youtube_id,title,channel_id,channel_title,duration_s,fetched_at) VALUES
+             ('new-ok','Train 5','chr','Rails',1200,9),('new-long','Train movie','chr','Rails',7200,9);
+             INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES
+             ('new-ok',NULL,'{pid}','auto-allowed',9),('new-long',NULL,'{pid}','auto-allowed',9);"
+        ))
+        .unwrap();
+    assert_eq!(tile_ids(&get("/api/child/home").await.1), ["ep", "new-ok"]);
+
+    // Allowing one excluded video outright overrides the rules.
+    let (s, _) = e
+        .parent(
+            "POST",
+            "/api/parent/policies",
+            Some(json!({"url": "https://www.youtube.com/watch?v=comp"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(granted(&e.child_play(&tok, "comp").await));
+
+    let (s, _) = e
+        .parent("PUT", "/api/parent/policies/nope/rules", Some(json!({})))
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = e
+        .parent(
+            "PUT",
+            &format!("/api/parent/policies/{pid}/rules"),
+            Some(json!({"max_minutes": -1})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
