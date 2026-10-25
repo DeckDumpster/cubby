@@ -7,6 +7,7 @@
 		badge,
 		BEAT_MS,
 		SETTLE_MS,
+		AUTOPLAY_WAIT_MS,
 		SEEK_JUMP_S,
 		clock,
 	endReason,
@@ -48,6 +49,9 @@
 	let playing = $state(false);
 	// False from every start, resume and seek until PLAYING has lasted SETTLE_MS: the iframe stays visibility:hidden meanwhile.
 	let settled = $state(false);
+	// True once the browser refused to autoplay: the ready frame clears and the Play control is what is left.
+	let blocked = $state(false);
+	let blockTimer: ReturnType<typeof setTimeout> | undefined;
 	let settleTimer: ReturnType<typeof setTimeout> | undefined;
 	let lastPos = 0;
 	let pos = $state(0);
@@ -224,6 +228,9 @@
 		clearTimeout(settleTimer);
 		settleTimer = undefined;
 		settled = false;
+		clearTimeout(blockTimer);
+		blockTimer = undefined;
+		blocked = false;
 		lastPos = 0;
 		try {
 			player?.destroy();
@@ -364,7 +371,16 @@
 				videoId: tile.youtube_id,
 				playerVars: { ...PLAYER_VARS, origin },
 				events: {
-					onReady: () => {},
+					onReady: () => {
+						player?.playVideo?.();
+						clearTimeout(blockTimer);
+						blockTimer = setTimeout(() => {
+							if (!playing) blocked = true;
+						}, AUTOPLAY_WAIT_MS);
+					},
+					onAutoplayBlocked: () => {
+						blocked = true;
+					},
 					onStateChange: (e: { data: number }) => onState(YT, e.data)
 				}
 			});
@@ -382,6 +398,9 @@
 			return;
 		}
 		if (s === S.PLAYING) {
+			clearTimeout(blockTimer);
+			blockTimer = undefined;
+			blocked = false;
 			paused = false;
 			playing = true;
 			armSettle();
@@ -527,8 +546,8 @@
 				{:else if current}
 					<h1 class="now">{current.title}</h1>
 					<div class="stage">
-						<div class="player" class:hidden={paused} class:unsettled={!settled} data-settled={settled} bind:this={host}></div>
-						{#if !settled && !paused}
+						<div class="player" class:hidden={paused} class:unsettled={!settled && !blocked} data-settled={settled} bind:this={host}></div>
+						{#if !settled && !paused && !blocked}
 							<div class="ready" data-testid="ready-frame"><h2 class="break">Getting your video ready…</h2></div>
 						{/if}
 						{#if paused}
