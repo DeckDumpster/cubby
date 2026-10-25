@@ -661,7 +661,7 @@
 	input::placeholder { color: var(--muted); opacity: 1; }
 
 	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-4); }
-	.rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; gap: var(--space-4); }
+	.rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; column-gap: var(--space-4); row-gap: 0; }
 	.rail > :global(*) { min-width: 0; }
 	.seeall { margin-left: auto; }
 	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; min-height: 0; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
