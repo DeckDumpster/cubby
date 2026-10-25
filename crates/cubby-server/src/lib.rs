@@ -326,7 +326,7 @@ impl Actor {
         }
     }
 
-    fn get(&self) -> Option<String> {
+    pub(crate) fn get(&self) -> Option<String> {
         self.0.lock().ok().and_then(|g| g.clone())
     }
 }

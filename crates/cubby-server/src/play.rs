@@ -64,7 +64,45 @@ fn child_tz(conn: &Connection, child: &str) -> rusqlite::Result<String> {
 }
 
 /// No budget row means no limits.
-fn load_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
+fn load_budget(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Budget> {
+    let base = load_base_budget(conn, child)?;
+    let (videos, minutes) = extras(conn, child, now)?;
+    Ok(budget::with_extra(&base, videos, minutes))
+}
+
+/// The video equivalents and minutes granted for today that have not yet expired. They lift the
+/// limits only; the daily viewing window is untouched.
+fn extras(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<(f64, f64)> {
+    conn.query_row(
+        "SELECT COALESCE(SUM(videos),0), COALESCE(SUM(minutes),0) FROM budget_grants
+         WHERE child_id=?1 AND granted_at<=?2 AND expires_at>?2",
+        params![child, now],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+}
+
+/// A parent's grant of extra minutes and/or video equivalents, good until the child's next local
+/// midnight. Returns the grant's id.
+pub(crate) fn grant_extra(
+    conn: &Connection,
+    child: &str,
+    videos: f64,
+    minutes: f64,
+    by: &str,
+    note: Option<&str>,
+    now: i64,
+) -> rusqlite::Result<String> {
+    let tz = child_tz(conn, child)?;
+    let id = ulid::Ulid::generate().to_string();
+    conn.execute(
+        "INSERT INTO budget_grants(id,child_id,granted_at,expires_at,minutes,videos,granted_by,note)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        params![id, child, now, budget::next_midnight(&tz, now), minutes, videos, by, note],
+    )?;
+    Ok(id)
+}
+
+fn load_base_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
     let row = conn
         .query_row(
             "SELECT video_equivalents, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes
@@ -157,7 +195,7 @@ pub fn play(
             next_start: None,
         });
     }
-    let b = load_budget(conn, &dev.child_id)?;
+    let b = load_budget(conn, &dev.child_id, now)?;
     let tz = child_tz(conn, &dev.child_id)?;
     let u = usage(conn, &dev.child_id, &tz, now)?;
     if let Err(r) = budget::may_start(&b, u, &tz, now) {
@@ -251,7 +289,7 @@ pub fn beat(
         "UPDATE play_grants SET last_beat_at=?2, max_position_s=?3, watched_s=?4, charge=?5 WHERE id=?1",
         params![grant_id, now, p.position_s, p.watched_s, new_charge],
     )?;
-    let b = load_budget(conn, &dev.child_id)?;
+    let b = load_budget(conn, &dev.child_id, now)?;
     let tz = child_tz(conn, &dev.child_id)?;
     let u = usage(conn, &dev.child_id, &tz, now)?;
     Ok(BeatOutcome {
@@ -318,7 +356,7 @@ pub(crate) fn remaining_json_for(
     child: &str,
     now: i64,
 ) -> rusqlite::Result<Value> {
-    let b = load_budget(conn, child)?;
+    let b = load_budget(conn, child, now)?;
     let u = usage(conn, child, &child_tz(conn, child)?, now)?;
     Ok(remaining_json(budget::remaining(&b, u)))
 }
@@ -326,7 +364,7 @@ pub(crate) fn remaining_json_for(
 /// One child's progress against the limits, from the same budget, usage and clock functions the
 /// play path decides with. An unlimited limit is `null`, never a number.
 pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Value> {
-    let b = load_budget(conn, child)?;
+    let b = load_budget(conn, child, now)?;
     let tz = child_tz(conn, child)?;
     let u = usage(conn, child, &tz, now)?;
     let r = budget::remaining(&b, u);
@@ -349,8 +387,22 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
         json!({"limit": limit, "used": used, "left": left.map(|l| l.max(0.0)),
             "reached": left.is_some_and(|l| l <= 0.0)})
     };
+    let mut q = conn.prepare(
+        "SELECT id, granted_at, expires_at, minutes, videos, granted_by, note FROM budget_grants
+         WHERE child_id=?1 AND expires_at>?2 ORDER BY granted_at DESC, rowid DESC",
+    )?;
+    let grants = q
+        .query_map(params![child, now], |r| {
+            Ok(
+                json!({"id": r.get::<_, String>(0)?, "at": r.get::<_, i64>(1)?,
+                "expires_at": r.get::<_, i64>(2)?, "minutes": r.get::<_, f64>(3)?,
+                "videos": r.get::<_, f64>(4)?, "by": r.get::<_, String>(5)?,
+                "note": r.get::<_, Option<String>>(6)?}),
+            )
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(json!({
-        "child_id": child, "tz": tz,
+        "child_id": child, "tz": tz, "grants": grants,
         "videos": side(b.video_equivalents, u.charge, r.videos),
         "ve_minutes": b.ve_minutes,
         "minutes": side(b.minutes_cap, u.watched_s / 60.0, r.minutes),
@@ -662,6 +714,63 @@ mod tests {
                 next_start: None
             }
         );
+    }
+
+    fn spend_one_video(c: &Connection) {
+        let id = grant(c, "v1", T0);
+        watch(c, &id, T0, 600);
+        end(c, &dev(), &id, "ended", T0 + 601).unwrap();
+    }
+
+    fn refused(c: &Connection, at: i64) -> Option<&'static str> {
+        match play(c, &dev(), "v2", at).unwrap() {
+            PlayOutcome::Refused { reason, .. } => Some(reason),
+            PlayOutcome::Granted { .. } => None,
+        }
+    }
+
+    #[test]
+    fn a_video_grant_lets_an_out_of_budget_child_start_again() {
+        let c = db();
+        budget_row(&c, 1.0, 0, "");
+        spend_one_video(&c);
+        assert_eq!(refused(&c, T0 + 700), Some("out-of-videos"));
+        grant_extra(&c, "kid", 1.0, 0.0, "mum@example.com", None, T0 + 710).unwrap();
+        assert_eq!(refused(&c, T0 + 720), None);
+    }
+
+    #[test]
+    fn a_minutes_grant_lifts_the_minutes_cap() {
+        let c = db();
+        c.execute(
+            "INSERT INTO budgets(child_id,video_equivalents,window_s,minutes_cap,cutoff_mid_play,daily_windows)
+             VALUES ('kid',NULL,86400,10,0,NULL)",
+            [],
+        )
+        .unwrap();
+        spend_one_video(&c);
+        assert_eq!(refused(&c, T0 + 700), Some("out-of-minutes"));
+        grant_extra(&c, "kid", 0.0, 15.0, "mum", Some("homework done"), T0 + 710).unwrap();
+        assert_eq!(refused(&c, T0 + 720), None);
+    }
+
+    #[test]
+    fn a_grant_expires_at_the_childs_local_midnight() {
+        let c = db();
+        budget_row(&c, 1.0, 0, "");
+        spend_one_video(&c);
+        grant_extra(&c, "kid", 1.0, 0.0, "mum", None, T0 + 710).unwrap();
+        // Local midnight (UTC) is 12 h after T0; the spent video is still inside the 24 h window.
+        assert_eq!(refused(&c, T0 + 12 * 3600 - 1), None);
+        assert_eq!(refused(&c, T0 + 12 * 3600), Some("out-of-videos"));
+    }
+
+    #[test]
+    fn a_grant_does_not_open_a_closed_daily_window() {
+        let c = db();
+        budget_row(&c, 1.0, 0, r#"[["14:00","18:00"]]"#);
+        grant_extra(&c, "kid", 1.0, 60.0, "mum", None, T0).unwrap();
+        assert_eq!(refused(&c, T0), Some("not-now"));
     }
 
     #[test]

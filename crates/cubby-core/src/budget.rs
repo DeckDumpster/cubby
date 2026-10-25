@@ -224,6 +224,35 @@ pub fn current_window_end(windows: &[(u32, u32)], tz: &str, now: i64) -> Option<
         .map(|&(_, e)| now + i64::from(e) * 60 - secs)
 }
 
+/// The unix time of the next local midnight in `tz` after `now`. An unreadable zone gives `now`,
+/// so a grant keyed to it expires at once rather than lasting.
+pub fn next_midnight(tz: &str, now: i64) -> i64 {
+    let go = || -> Option<i64> {
+        let zone = jiff::tz::TimeZone::get(tz).ok()?;
+        let local = jiff::Timestamp::from_second(now)
+            .ok()?
+            .to_zoned(zone.clone());
+        let next = local.date().checked_add(jiff::Span::new().days(1)).ok()?;
+        Some(
+            next.at(0, 0, 0, 0)
+                .to_zoned(zone)
+                .ok()?
+                .timestamp()
+                .as_second(),
+        )
+    };
+    go().unwrap_or(now)
+}
+
+/// Adds today's granted extras to the limits. An unlimited limit stays unlimited.
+pub fn with_extra(b: &Budget, videos: f64, minutes: f64) -> Budget {
+    Budget {
+        video_equivalents: b.video_equivalents.map(|v| v + videos),
+        minutes_cap: b.minutes_cap.map(|m| m + minutes),
+        ..b.clone()
+    }
+}
+
 /// Parses `[["07:00","19:00"]]`-style pairs as the budgets column stores them.
 pub fn parse_windows(pairs: &[(String, String)]) -> Option<Vec<(u32, u32)>> {
     fn hm(s: &str) -> Option<u32> {
@@ -283,6 +312,28 @@ mod tests {
             Some(NOON_UTC + 7 * 3600)
         );
         assert_eq!(current_window_end(&w, "UTC", NOON_UTC + 8 * 3600), None);
+    }
+
+    #[test]
+    fn the_next_midnight_is_local_to_the_zone() {
+        // 12:00 UTC is 21:00 in Tokyo, so local midnight is 3 h away; in UTC it is 12 h away.
+        assert_eq!(next_midnight("Asia/Tokyo", NOON_UTC), NOON_UTC + 3 * 3600);
+        assert_eq!(next_midnight("UTC", NOON_UTC), NOON_UTC + 12 * 3600);
+        assert_eq!(next_midnight("Mars/Olympus", NOON_UTC), NOON_UTC);
+    }
+
+    #[test]
+    fn extras_raise_limits_but_not_unlimited_ones() {
+        let b = with_extra(&budget(), 1.0, 15.0);
+        assert_eq!(
+            (b.video_equivalents, b.minutes_cap),
+            (Some(4.0), Some(75.0))
+        );
+        let open = Budget {
+            video_equivalents: None,
+            ..budget()
+        };
+        assert_eq!(with_extra(&open, 1.0, 0.0).video_equivalents, None);
     }
 
     #[test]
