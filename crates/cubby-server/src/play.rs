@@ -43,6 +43,7 @@ pub enum PlayOutcome {
     Granted {
         grant_id: String,
         remaining: Remaining,
+        duration_s: f64,
     },
     Refused {
         reason: &'static str,
@@ -334,6 +335,7 @@ pub fn play(
     Ok(PlayOutcome::Granted {
         grant_id,
         remaining: budget::remaining(&b, u),
+        duration_s: duration.unwrap_or(0.0),
     })
 }
 
@@ -617,6 +619,7 @@ async fn play_route(
         PlayOutcome::Granted {
             grant_id,
             remaining,
+            duration_s,
         } => {
             // A granted video is by definition allowed, so its title may be shown: a shared
             // /videos/{id} link has no tile to take it from.
@@ -629,7 +632,7 @@ async fn play_route(
                 .optional()
                 .unwrap_or(None)
                 .flatten();
-            json!({"grant_id": grant_id, "title": title, "remaining": remaining_json(remaining, window_left)})
+            json!({"grant_id": grant_id, "duration_s": duration_s, "title": title, "remaining": remaining_json(remaining, window_left)})
         }
         PlayOutcome::Refused { reason, next_start } => {
             json!({"refused": reason, "next_start": next_start,

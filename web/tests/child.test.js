@@ -107,7 +107,16 @@ import { moreAfterThis, startNotice, minutesLeft, timeNotice } from '../src/lib/
 
 test('notices: counts after this video, nudge stages', () => {
 	assert.strictEqual(moreAfterThis(3), 2);
-	assert.strictEqual(moreAfterThis(1.5), 0);
+	assert.strictEqual(moreAfterThis(1.5), 0.5);
+	assert.strictEqual(moreAfterThis(1), 0);
+	assert.strictEqual(startNotice(moreAfterThis(1.64, 7 * 60, 15)), 'You can watch 1 more video after this one.');
+	assert.strictEqual(startNotice(moreAfterThis(1.64, 15 * 60, 15)), 'You have a little more time after this one.');
+	assert.strictEqual(startNotice(moreAfterThis(1, 15 * 60, 15)), 'This is the last video.');
+	assert.strictEqual(
+		startNotice(moreAfterThis(0.5, 15 * 60, 15)),
+		'This is the last video. Videos stop partway through this one.'
+	);
+	assert.strictEqual(startNotice(moreAfterThis(1.64, null, 15)), 'You have a little more time after this one.');
 	assert.strictEqual(moreAfterThis(null), null);
 	assert.strictEqual(startNotice(0), 'This is the last video.');
 	assert.strictEqual(startNotice(1), 'You can watch 1 more video after this one.');

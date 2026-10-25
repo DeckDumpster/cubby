@@ -33,7 +33,7 @@
 	type Tile = { youtube_id: string; title: string; channel_id?: string; channel_title?: string; channel_avatar?: string; thumb?: string };
 	type Channel = { channel_id: string; title: string; thumb?: string };
 	type ChannelPage = { channel: Channel; tiles: Tile[]; can_request: boolean; requested: boolean };
-	type Remaining = { videos: number | null; minutes: number | null; window_left_s?: number | null };
+	type Remaining = { videos: number | null; minutes: number | null; window_left_s?: number | null; ve_minutes?: number | null };
 
 	const SHOWN = 8;
 	const origin = typeof location === 'undefined' ? 'http://localhost' : location.origin;
@@ -550,7 +550,7 @@
 		remaining = data.remaining ?? remaining;
 		nudgeStage = 0;
 		prevVideos = data.remaining?.videos ?? null;
-		const more = moreAfterThis(data.remaining?.videos);
+		const more = moreAfterThis(data.remaining?.videos, data.duration_s, data.remaining?.ve_minutes);
 		notice = more == null ? '' : startNotice(more);
 		updateNotice(data.remaining);
 		view = 'playing';
