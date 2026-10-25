@@ -53,13 +53,9 @@
 		`Added ${[minutes ? `${num(minutes)} min` : '', videos ? `${num(videos)} video${videos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')} for ${name}`;
 
 	const remove = async (child: string, grantId: string) => {
-		failed = '';
-		try {
-			await api('DELETE', `/api/parent/children/${child}/extra/${grantId}`);
-			await load();
-		} catch {
-			failed = 'Could not remove that extra. Try again.';
-		}
+		await api('DELETE', `/api/parent/children/${child}/extra/${grantId}`);
+		await load();
+		return 'Removed that extra';
 	};
 
 	const num = (n: number) => String(Math.round(n * 10) / 10);
@@ -137,7 +133,7 @@
 								{#if g.removed_at !== null}
 									<small>· removed by {g.removed_by} at {when(g.removed_at, r.tz)}</small>
 								{:else}
-									<button type="button" class="remove" onclick={() => remove(r.child_id, g.id)}>(Remove)</button>
+									<ActionButton class="remove" run={() => remove(r.child_id, g.id)} fail="remove that extra">(Remove)</ActionButton>
 								{/if}
 							</li>
 						{/each}
@@ -171,6 +167,6 @@
 	.grants { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
 	.struck { text-decoration: line-through; }
 	.grants li { margin-bottom: var(--space-1); }
-	.remove { min-height: 2.75rem; min-width: 2.75rem; font: inherit; background: none; border: 0; color: var(--danger); text-decoration: underline; }
+	.grants :global(.remove) { min-height: 2.75rem; min-width: 2.75rem; font: inherit; background: none; border: 0; color: var(--danger); text-decoration: underline; }
 	small { color: var(--muted); }
 </style>
