@@ -30,7 +30,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/parent/children/{id}", put(edit_child))
         .route("/api/parent/children/{id}/budget", put(set_budget))
         .route("/api/parent/children/{id}/extra", post(grant_extra))
-        .route("/api/parent/children/{id}/extra/{grant}", delete(remove_extra))
+        .route(
+            "/api/parent/children/{id}/extra/{grant}",
+            delete(remove_extra),
+        )
         .route("/api/parent/children/{id}/history", get(child_history))
         .route("/api/parent/policies", get(policies).post(add_policy))
         .route("/api/parent/policies/preview", post(preview))
