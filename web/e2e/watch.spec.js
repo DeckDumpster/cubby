@@ -59,6 +59,7 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		const path = new URL(req.url()).pathname;
 		calls.push({ path, body: req.postDataJSON?.() ?? null });
 		const json = (data) => route.fulfill({ json: data });
+		if (path.includes('/playlists/')) return json({ ok: true });
 		if (path.endsWith('/home')) return json(HOME);
 		if (path.endsWith('/recent')) {
 			const q = new URL(req.url()).searchParams;
@@ -562,3 +563,39 @@ for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { w
 		await page.screenshot({ path: `${OUT}/notice-${name}-fullscreen.png` });
 	});
 }
+
+test('every tile has a Watch later control that saves and unsaves, and the row shows the saved videos', async ({ page }) => {
+	const calls = await setup(page);
+	await page.route('**/api/child/home', (route) =>
+		route.fulfill({ json: { ...HOME, saved: ['v2'], watch_later: [tile('v2', 'Second video')] } })
+	);
+	await page.goto('/watch');
+	const row = page.getByTestId('watch-later-row');
+	await expect(row).toContainText('Second video');
+	const first = page.locator('.tilewrap', { hasText: 'First video' }).getByTestId('save-later');
+	await expect(first).toContainText('Later');
+	await first.click();
+	await expect(first).toContainText('Saved');
+	expect(calls.some((c) => c.path.endsWith('/playlists/watch_later/items/v1'))).toBe(true);
+	await page.screenshot({ path: test.info().outputPath('landing.png'), fullPage: true });
+	await first.click();
+	await expect(first).toContainText('Later');
+});
+
+test('a refusal offers Save it for later in one tap', async ({ page }) => {
+	const calls = await setup(page, { play: { refused: 'out-of-minutes', next_start: null } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).first().click();
+	await page.getByTestId('save-for-later').click();
+	await expect(page.getByTestId('saved-note')).toBeVisible();
+	expect(calls.some((c) => c.path.endsWith('/playlists/watch_later/items/v1'))).toBe(true);
+	await page.screenshot({ path: test.info().outputPath('refusal.png') });
+});
+
+test('a video that is not allowed cannot be saved from the refusal card', async ({ page }) => {
+	await setup(page, { play: { refused: 'not-allowed', next_start: null } });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).first().click();
+	await expect(page.getByTestId('refusal')).toBeVisible();
+	await expect(page.getByTestId('save-for-later')).toHaveCount(0);
+});

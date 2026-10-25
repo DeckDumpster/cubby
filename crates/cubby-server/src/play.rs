@@ -433,6 +433,14 @@ pub fn end(
         "UPDATE play_grants SET ended_at=?2, end_reason=?3 WHERE id=?1",
         params![grant_id, now, reason],
     )?;
+    if reason == "ended" {
+        // Watched to the end: it leaves Watch later.
+        conn.execute(
+            "DELETE FROM playlist_items WHERE youtube_id=(SELECT youtube_id FROM play_grants WHERE id=?1) \
+             AND playlist_id IN (SELECT id FROM playlists WHERE child_id=?2 AND kind='watch_later')",
+            params![grant_id, dev.child_id],
+        )?;
+    }
     Ok(())
 }
 
@@ -1134,6 +1142,25 @@ mod tests {
             child_id: "sib".into(),
         };
         assert_eq!(beat(&c, &other, &id, 1.0, T0 + 1), Err(PlayError::NoGrant));
+    }
+
+    #[test]
+    fn a_video_watched_to_the_end_leaves_watch_later_and_a_left_one_stays() {
+        let c = db();
+        for v in ["v1", "v2"] {
+            cubby_db::playlists::add(&c, "kid", "watch_later", v, T0).unwrap();
+        }
+        let id = grant(&c, "v1", T0);
+        end(&c, &dev(), &id, "left", T0 + 5).unwrap();
+        let left = |c: &Connection| {
+            cubby_db::playlists::list(c, "kid", "watch_later")
+                .unwrap()
+                .len()
+        };
+        assert_eq!(left(&c), 2);
+        let id = grant(&c, "v1", T0 + 10);
+        end(&c, &dev(), &id, "ended", T0 + 20).unwrap();
+        assert_eq!(left(&c), 1);
     }
 
     #[test]

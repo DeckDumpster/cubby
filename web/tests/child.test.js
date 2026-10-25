@@ -9,7 +9,9 @@ import {
 	PLAYER_HOST,
 	beatDue,
 	endReason,
-	loadYT
+	loadYT,
+	canSaveForLater,
+	watchLaterPath
 } from '../src/lib/child.js';
 
 test('the pause card is for the CubbyShell user agent only', () => {
@@ -116,4 +118,10 @@ test('notices: counts after this video, nudge stages', () => {
 	assert.strictEqual(timeNotice(4.5, 1), null);
 	assert.deepEqual(timeNotice(0.9, 1), { text: 'After 1 more minute, videos will stop.', stage: 2 });
 	assert.strictEqual(timeNotice(0.5, 2), null);
+});
+
+test('only a refusal that is not about the video itself offers Save it for later', () => {
+	for (const r of ['out-of-videos', 'out-of-minutes', 'not-now']) assert.equal(canSaveForLater(r), true);
+	assert.equal(canSaveForLater('not-allowed'), false);
+	assert.equal(watchLaterPath('a b'), '/api/child/playlists/watch_later/items/a%20b');
 });

@@ -21,6 +21,7 @@ const MIGRATIONS: [&str; 10] = [
     include_str!("family_v9.sql"),
     include_str!("family_v10.sql"),
     include_str!("family_v11.sql"),
+    include_str!("family_v12.sql"),
 ];
 
 /// Brings `conn` up to this build's family schema; refuses a newer one.

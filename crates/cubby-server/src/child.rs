@@ -4,14 +4,15 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Extension, Json, Router};
 use cubby_core::rank::{ChildCtx, Ranker, V1Ranker, VideoMeta, rank_checked};
 use cubby_db::browse::{self, History, VideoRow};
 use cubby_db::identity::Device;
+use cubby_db::playlists::{self, PlaylistError};
 use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -169,9 +170,13 @@ fn home_with(
             |r| Ok(json!({"name": r.get::<_, String>(0)?, "avatar": r.get::<_, String>(1)?})),
         )
         .unwrap_or(Value::Null);
+    let later = playlists::list(conn, child_id, playlists::WATCH_LATER).unwrap_or_default();
+    let saved = playlists::saved_ids(conn, child_id, playlists::WATCH_LATER)?;
     Ok(json!({
         "child": child,
         "remaining": remaining,
+        "saved": saved.iter().collect::<Vec<_>>(),
+        "watch_later": later.iter().map(tile).collect::<Vec<_>>(),
         "sections": [
             {"key": "continue", "title": "Keep watching", "tiles": cont},
             {"key": "liked_channels", "title": "From channels you like", "tiles": ranked(ranker, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
@@ -301,6 +306,14 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/child/next", get(next_route))
         .route("/api/child/recent", get(recent_route))
         .route("/api/child/request", post(request_route))
+        .route(
+            "/api/child/playlists/{kind}/items",
+            get(playlist_list_route),
+        )
+        .route(
+            "/api/child/playlists/{kind}/items/{id}",
+            put(playlist_add_route).delete(playlist_remove_route),
+        )
 }
 
 #[derive(Deserialize)]
@@ -333,6 +346,50 @@ async fn request_route(
     .map_err(internal)?
     .ok_or_else(|| ApiError::new(StatusCode::FORBIDDEN, "that video is not available"))?;
     Ok(Json(json!({"ok": true, "id": id})))
+}
+
+fn playlist_err(e: PlaylistError) -> ApiError {
+    match e {
+        PlaylistError::UnknownKind => ApiError::new(StatusCode::NOT_FOUND, "no such playlist"),
+        PlaylistError::NotAllowed => ApiError::new(StatusCode::FORBIDDEN, "not allowed"),
+        PlaylistError::Db(m) => internal(m),
+    }
+}
+
+async fn playlist_list_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Path(kind): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let conn = open_own(&state, &family_id)?;
+    let rows = playlists::list(&conn, &dev.child_id, &kind).map_err(playlist_err)?;
+    Ok(Json(
+        json!({"kind": kind, "tiles": rows.iter().map(tile).collect::<Vec<_>>()}),
+    ))
+}
+
+async fn playlist_add_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Path((kind, id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let conn = open_own(&state, &family_id)?;
+    let now = crate::play::unix_now();
+    playlists::add(&conn, &dev.child_id, &kind, &id, now).map_err(playlist_err)?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn playlist_remove_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Path((kind, id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let conn = open_own(&state, &family_id)?;
+    playlists::remove(&conn, &dev.child_id, &kind, &id).map_err(playlist_err)?;
+    Ok(Json(json!({"ok": true})))
 }
 
 fn internal(e: impl std::fmt::Display) -> ApiError {

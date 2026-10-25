@@ -20,10 +20,10 @@ pub struct VideoRow {
     pub published_at: i64,
 }
 
-const COLUMNS: &str = "v.youtube_id, v.title, v.channel_id, v.channel_title, v.tags, \
+pub(crate) const COLUMNS: &str = "v.youtube_id, v.title, v.channel_id, v.channel_title, v.tags, \
                        v.duration_s, v.thumb_path, v.fetched_at";
 
-fn row(r: &rusqlite::Row) -> rusqlite::Result<VideoRow> {
+pub(crate) fn row(r: &rusqlite::Row) -> rusqlite::Result<VideoRow> {
     let tags: Option<String> = r.get(4)?;
     Ok(VideoRow {
         youtube_id: r.get(0)?,
