@@ -158,3 +158,45 @@ async fn recent_pages_the_history_newest_first() {
     assert!(ids(&body["tiles"]).is_empty());
     assert_eq!(body["more"], false);
 }
+
+async fn post(app: axum::Router, path: &str) -> (StatusCode, Value) {
+    let req = Request::post(path)
+        .header("authorization", "Bearer kid")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    let status = res.status();
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn a_channel_page_lists_only_allowed_videos_and_the_home_lists_the_channel() {
+    let (st, body) = get(api(false), "/api/child/channel/Trains", true).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(ids(&body["tiles"]), ["a", "b"]);
+    assert_eq!(body["can_request"], true);
+    assert_eq!(body["requested"], false);
+    let (_, home) = get(api(false), "/api/child/home", true).await;
+    assert_eq!(home["channels"][0]["channel_id"], "Trains");
+    assert_eq!(home["channels"].as_array().unwrap().len(), 1);
+    // a channel with only another child's video is indistinguishable from none
+    let (st, _) = get(api(false), "/api/child/channel/nowhere", true).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    let (st, _) = get(api(false), "/api/child/channel/Trains", false).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn asking_for_more_files_one_open_request_then_reads_as_waiting() {
+    let app = api(false);
+    let (st, body) = post(app.clone(), "/api/child/channel/Trains/request").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["requested"], true);
+    post(app.clone(), "/api/child/channel/Trains/request").await;
+    let (_, page) = get(app, "/api/child/channel/Trains", true).await;
+    assert_eq!(page["requested"], true);
+    assert_eq!(page["can_request"], false);
+    let (st, _) = post(api(false), "/api/child/channel/nowhere/request").await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}
