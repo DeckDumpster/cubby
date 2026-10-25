@@ -508,7 +508,7 @@
 			class:on={saved[t.youtube_id]}
 			data-testid="save-later"
 			aria-pressed={!!saved[t.youtube_id]}
-			aria-label={saved[t.youtube_id] ? `Saved to Watch later: ${t.title}` : `Add to Watch later: ${t.title}`}
+			aria-label={saved[t.youtube_id] ? 'Saved to Watch later, tap to remove' : 'Add to Watch later'}
 			onclick={() => toggleSaved(t)}
 		>
 			<span aria-hidden="true">{saved[t.youtube_id] ? '✓' : '🕒'}</span>
