@@ -62,10 +62,10 @@ mod tests {
     #[test]
     fn the_rolling_window_column_is_gone_and_budgets_survive() {
         let mut c = Connection::open_in_memory().unwrap();
-        for m in &MIGRATIONS[..4] {
+        for m in &MIGRATIONS[..6] {
             c.execute_batch(m).unwrap();
         }
-        c.pragma_update(None, "user_version", 4).unwrap();
+        c.pragma_update(None, "user_version", 6).unwrap();
         c.execute_batch(
             "INSERT INTO children(id,name,avatar,tz) VALUES ('a','A','','UTC');
              INSERT INTO budgets(child_id,video_equivalents,window_s,minutes_cap) VALUES ('a',3,3600,30);",
