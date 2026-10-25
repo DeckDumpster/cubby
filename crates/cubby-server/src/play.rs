@@ -626,7 +626,8 @@ async fn play_route(
                     params![body.youtube_id],
                     |r| r.get(0),
                 )
-                .optional()?
+                .optional()
+                .unwrap_or(None)
                 .flatten();
             json!({"grant_id": grant_id, "title": title, "remaining": remaining_json(remaining, window_left)})
         }

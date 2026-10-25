@@ -198,6 +198,7 @@ test('a granted player shows no YouTube chrome and Cubby controls drive it', asy
 	await setup(page);
 	await page.goto('/');
 	await page.getByRole('link', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	await page.evaluate(() => window.__state(1));
 	await expect(page.getByTestId('playpause')).toHaveAccessibleName('Pause');
 	await expect(page.getByTestId('clock')).toContainText('0:12 / -1:28');
@@ -218,6 +219,7 @@ test('the iframe stays visibility:hidden behind a ready frame after start and se
 	await page.getByRole('link', { name: /First video/ }).click();
 	const frame = page.locator('iframe[title="fake player"]');
 	const hidden = () => frame.evaluate((e) => getComputedStyle(e).visibility);
+	await expect(frame).toBeAttached();
 	await page.evaluate(() => window.__state(1));
 	expect(await hidden()).toBe('hidden');
 	await expect(page.getByTestId('ready-frame')).toBeVisible();
@@ -247,6 +249,7 @@ test('an embed that navigates off the granted id is destroyed and the grant ends
 	const calls = await setup(page);
 	await page.goto('/');
 	await page.getByRole('link', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	await page.evaluate(() => window.__state(1));
 	await page.evaluate(() => {
 		window.__players[0].vid = 'evil';
