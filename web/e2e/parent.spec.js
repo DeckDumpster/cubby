@@ -238,6 +238,8 @@ test('the progress card shows used and left against the limits and who is watchi
 	await expect(theo).toContainText('limit reached');
 	await expect(theo).toContainText('No limit');
 	await expect(theo).toContainText('Viewing is closed');
+	await expect(page.locator('body')).not.toContainText('Extra lasts until midnight');
+	await expect(page.locator('body')).not.toContainText('Resets at midnight');
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
 	expect(overflow).toBe(false);
 	if (shots) await page.screenshot({ path: `${shots}/progress-390.png`, fullPage: true });
