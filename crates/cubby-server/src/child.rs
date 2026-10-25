@@ -23,6 +23,8 @@ pub const NEXT_TILES: usize = 12;
 const HOME_ROW: usize = 12;
 const HOME_ALL: usize = 60;
 const SEARCH_LIMIT: usize = 40;
+const RECENT_PAGE: usize = 24;
+const RECENT_MAX: usize = 60;
 
 /// Resolves a request to the child its device token belongs to.
 pub type Auth = Arc<dyn Fn(&HeaderMap) -> Option<String> + Send + Sync>;
@@ -59,6 +61,7 @@ pub fn router(api: ChildApi) -> Router {
         .route("/api/child/home", get(home))
         .route("/api/child/search", get(search))
         .route("/api/child/next", get(next))
+        .route("/api/child/recent", get(recent))
         .with_state(api)
 }
 
@@ -246,6 +249,32 @@ async fn search(
 }
 
 #[derive(Deserialize)]
+struct RecentParams {
+    limit: Option<usize>,
+    #[serde(default)]
+    offset: usize,
+}
+
+/// One page of the watch history; `more` says whether another page follows.
+fn recent_json(conn: &Connection, child_id: &str, p: &RecentParams) -> rusqlite::Result<Value> {
+    let limit = p.limit.unwrap_or(RECENT_PAGE).clamp(1, RECENT_MAX);
+    let mut rows = browse::recent(conn, child_id, limit + 1, p.offset)?;
+    let more = rows.len() > limit;
+    rows.truncate(limit);
+    Ok(json!({"tiles": rows.iter().map(tile).collect::<Vec<_>>(), "more": more}))
+}
+
+async fn recent(
+    State(api): State<ChildApi>,
+    headers: HeaderMap,
+    Query(p): Query<RecentParams>,
+) -> Result<Json<Value>, StatusCode> {
+    let child = authed(&api, &headers)?;
+    let conn = api.db.lock().unwrap();
+    recent_json(&conn, &child, &p).map(Json).map_err(db_err)
+}
+
+#[derive(Deserialize)]
 struct NextParams {
     after: String,
 }
@@ -269,6 +298,7 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/child/home", get(home_route))
         .route("/api/child/search", get(search_route))
         .route("/api/child/next", get(next_route))
+        .route("/api/child/recent", get(recent_route))
 }
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
@@ -300,6 +330,18 @@ async fn search_route(
         "q": p.q,
         "tiles": found.iter().map(tile).collect::<Vec<_>>(),
     })))
+}
+
+async fn recent_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Query(p): Query<RecentParams>,
+) -> Result<Json<Value>, ApiError> {
+    let conn = open_own(&state, &family_id)?;
+    recent_json(&conn, &dev.child_id, &p)
+        .map(Json)
+        .map_err(internal)
 }
 
 async fn next_route(

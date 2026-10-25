@@ -126,6 +126,33 @@ pub fn history(conn: &Connection, child_id: &str) -> rusqlite::Result<History> {
     Ok(h)
 }
 
+/// A play shorter than this never really started (a refusal, an instant bounce).
+pub const MIN_WATCHED_S: f64 = 5.0;
+
+/// The child's watched videos, one per video at its latest real start, newest first. Reads
+/// `playable`, so a video disallowed since is filtered out, not deleted from the history.
+pub fn recent(
+    conn: &Connection,
+    child_id: &str,
+    limit: usize,
+    offset: usize,
+) -> rusqlite::Result<Vec<VideoRow>> {
+    let sql = format!(
+        "SELECT {COLUMNS} FROM \
+           (SELECT youtube_id, MAX(granted_at) AS at FROM play_grants \
+            WHERE child_id = ?1 AND watched_s >= ?2 GROUP BY youtube_id) g \
+         JOIN videos v ON v.youtube_id = g.youtube_id \
+         JOIN playable p ON p.youtube_id = g.youtube_id AND p.child_id = ?1 \
+         ORDER BY g.at DESC, v.youtube_id LIMIT ?3 OFFSET ?4"
+    );
+    conn.prepare(&sql)?
+        .query_map(
+            params![child_id, MIN_WATCHED_S, limit as i64, offset as i64],
+            row,
+        )?
+        .collect()
+}
+
 /// Fixtures over the real family schema: children `kid` and `sib`, and a device `d` for `kid`.
 pub mod fixture {
     use rusqlite::Connection;
@@ -235,5 +262,27 @@ mod tests {
         assert_eq!(h.resumable, ["half"]);
         assert_eq!(h.watched.len(), 2);
         assert!(h.liked_channels.contains("c2"));
+    }
+
+    #[test]
+    fn recent_is_newest_first_deduped_started_playable_and_own() {
+        let c = open();
+        for id in ["old", "mid", "new", "bounce", "gone", "theirs"] {
+            add_video(&c, id, "t", "c", "[]", 0);
+            allow(&c, id, "kid", "approved");
+        }
+        allow(&c, "gone", "kid", "blocked");
+        c.execute_batch(
+            "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,watched_s) VALUES
+               ('1','kid','d','old',10,60),('2','kid','d','mid',20,60),('3','kid','d','new',30,60),
+               ('4','kid','d','old',40,60),('5','kid','d','new',25,60),
+               ('6','kid','d','bounce',50,0),('7','kid','d','gone',60,60),
+               ('8','sib','d','theirs',70,60);",
+        )
+        .unwrap();
+        let all = |o| ids(recent(&c, "kid", 10, o).unwrap());
+        assert_eq!(all(0), ["old", "new", "mid"]);
+        assert_eq!(ids(recent(&c, "kid", 2, 1).unwrap()), ["new", "mid"]);
+        assert!(ids(recent(&c, "nobody", 10, 0).unwrap()).is_empty());
     }
 }
