@@ -291,3 +291,36 @@ fn a_handle_policy_whose_channel_is_already_allowed_is_dropped() {
         ["p1"]
     );
 }
+
+#[test]
+fn rules_judge_what_the_worker_brings_in_later() {
+    let c = db(&[("p1", "channel", "UCchan")]);
+    let mut t = fixtures();
+    run_pass(&c, &t, T0, None);
+    cubby_db::parent::set_rules(
+        &c,
+        "p1",
+        &cubby_db::parent::Rules {
+            exclude_shorts: true,
+            max_s: Some(1800),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    t.add(
+        "playlistItems",
+        &[("part", "contentDetails"), ("playlistId", "UUchan"), ("maxResults", "50")],
+        json!({"items":[{"contentDetails":{"videoId":"v6"}},{"contentDetails":{"videoId":"v7"}},{"contentDetails":{"videoId":"v1"}}]}),
+    );
+    t.add(
+        "videos",
+        &[("part", "snippet,contentDetails,status"), ("id", "v6,v7")],
+        json!({"items":[
+          {"id":"v6","snippet":{"title":"Six","channelId":"UCchan","channelTitle":"Chan"},"contentDetails":{"duration":"PT20M"},"status":{"privacyStatus":"public"}},
+          {"id":"v7","snippet":{"title":"Seven","channelId":"UCchan","channelTitle":"Chan"},"contentDetails":{"duration":"PT1H30M"},"status":{"privacyStatus":"public"}}]}),
+    );
+    run_pass(&c, &t, T0 + 900, None);
+    let p = strings(&c, "SELECT youtube_id FROM playable ORDER BY 1");
+    assert!(p.contains(&"v6".to_string()), "{p:?}");
+    assert!(!p.contains(&"v7".to_string()), "{p:?}");
+}

@@ -242,3 +242,29 @@ test('the progress card shows used and left against the limits and who is watchi
 	expect(overflow).toBe(false);
 	if (shots) await page.screenshot({ path: `${shots}/progress-390.png`, fullPage: true });
 });
+
+test('a channel shows a live allowed/excluded count before its filters are saved', async ({ page }) => {
+	const policy = { ...POLICIES[0], rules: { exclude_shorts: false, min_minutes: null, max_minutes: null, title_has: [], title_lacks: [] }, allowed_count: 3, excluded_count: 0 };
+	const puts = [];
+	await page.route('**/api/parent/**', (route) => {
+		const r = route.request();
+		const u = r.url();
+		if (u.endsWith('/rules/preview'))
+			return route.fulfill({ json: { allowed: 1, excluded: 2, excluded_videos: [{ youtube_id: 's', title: 'Quick clip', duration_s: 45 }, { youtube_id: 'c', title: 'Big compilation', duration_s: 5400 }] } });
+		if (r.method() === 'PUT' && u.endsWith('/rules')) {
+			puts.push(r.postDataJSON());
+			return route.fulfill({ json: {} });
+		}
+		return route.fulfill({ json: u.includes('/children') ? CHILDREN : u.includes('/policies') ? [policy] : u.includes('/library') ? { groups: [] } : [] });
+	});
+	await page.goto('/parent/allow');
+	await page.getByText('Filters', { exact: false }).first().click();
+	await page.getByLabel('Exclude Shorts').check();
+	await page.getByLabel('Longest, minutes').fill('30');
+	await expect(page.getByText('not saved yet')).toContainText('1 allowed · 2 excluded');
+	await page.getByText('Excluded videos').click();
+	await expect(page.getByText('Big compilation')).toBeVisible();
+	await page.getByRole('button', { name: 'Save filters' }).click();
+	await expect.poll(() => puts.length).toBe(1);
+	expect(puts[0]).toMatchObject({ exclude_shorts: true, max_minutes: 30, min_minutes: null });
+});
