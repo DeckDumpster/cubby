@@ -157,7 +157,7 @@ test('like and more-from-channel post requests', async ({ page }) => {
 test('a failed request reverts the button and says so gently', async ({ page }) => {
 	await setup(page, { requestStatus: 500 });
 	await page.goto('/watch');
-	await page.getByRole('button', { name: /First video/ }).click();
+	await page.getByRole('link', { name: /First video/ }).click();
 	await page.getByRole('button', { name: /I like this/ }).click();
 	await expect(page.getByText("Couldn't send — try again")).toBeVisible();
 	await expect(page.getByRole('button', { name: /I like this/ })).toBeEnabled();
