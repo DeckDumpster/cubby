@@ -109,8 +109,8 @@
 					<button type="button" onclick={() => grant(r.child_id, 0, 1)}>+1 video</button>
 				</div>
 				<form class="extra" onsubmit={(ev) => { ev.preventDefault(); const f = custom[r.child_id]; grant(r.child_id, Number(f?.minutes) || 0, Number(f?.videos) || 0); }}>
-					<input type="number" min="0" step="1" inputmode="numeric" placeholder="min" aria-label="Extra minutes" value={custom[r.child_id]?.minutes ?? ''} oninput={(ev) => (custom[r.child_id] = { videos: '', ...custom[r.child_id], minutes: ev.currentTarget.value })} />
-					<input type="number" min="0" step="0.5" inputmode="decimal" placeholder="videos" aria-label="Extra videos" value={custom[r.child_id]?.videos ?? ''} oninput={(ev) => (custom[r.child_id] = { minutes: '', ...custom[r.child_id], videos: ev.currentTarget.value })} />
+					<input type="number" min="0" step="1" inputmode="numeric" placeholder="min" aria-label="Extra minutes" value={custom[r.child_id]?.minutes ?? ''} oninput={(ev) => (custom[r.child_id] = { ...custom[r.child_id], videos: custom[r.child_id]?.videos ?? '', minutes: ev.currentTarget.value })} />
+					<input type="number" min="0" step="0.5" inputmode="decimal" placeholder="videos" aria-label="Extra videos" value={custom[r.child_id]?.videos ?? ''} oninput={(ev) => (custom[r.child_id] = { ...custom[r.child_id], minutes: custom[r.child_id]?.minutes ?? '', videos: ev.currentTarget.value })} />
 					<button type="submit">Add</button>
 				</form>
 				<small>Extra lasts until midnight. It does not open a closed viewing window.</small>
