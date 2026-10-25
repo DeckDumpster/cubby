@@ -20,7 +20,9 @@
 		token,
 		parseHome,
 		parseSearch,
-		parseRecent
+		parseRecent,
+		canSaveForLater,
+		watchLaterPath
 	} from '$lib/child.js';
 
 	type Tile = { youtube_id: string; title: string; channel_title?: string; channel_avatar?: string; thumb?: string };
@@ -52,6 +54,10 @@
 	let view = $state<'grid' | 'loading' | 'playing' | 'ended' | 'refused' | 'stopped'>('grid');
 	let current = $state<Tile | null>(null);
 	let refusal = $state('');
+	let refusalReason = $state('');
+	// Ids on the child's Watch later list, and the row of tiles shown on the landing page.
+	let saved = $state<Record<string, boolean>>({});
+	let later = $state<Tile[]>([]);
 	let paused = $state(false);
 	let playing = $state(false);
 	// False from every start, resume and seek until PLAYING has lasted SETTLE_MS: the iframe stays visibility:hidden meanwhile.
@@ -99,6 +105,8 @@
 		remaining = data.remaining ?? remaining;
 		total = data.total_videos ?? total;
 		sections = parseHome(data).sections;
+		later = data.watch_later ?? [];
+		saved = Object.fromEntries((data.saved ?? []).map((id: string) => [id, true]));
 		loadRecentRow();
 	}
 
@@ -365,6 +373,14 @@
 		}
 	}
 
+	async function toggleSaved(t: Tile) {
+		const was = !!saved[t.youtube_id];
+		saved[t.youtube_id] = !was;
+		const { status } = await guarded(api(watchLaterPath(t.youtube_id), { method: was ? 'DELETE' : 'PUT' }));
+		if (status !== 200) saved[t.youtube_id] = was;
+		else if (view === 'grid' && !results) await loadHome();
+	}
+
 	async function leaveWatch() {
 		if (view !== 'playing') return;
 		await beat('closed').catch(() => {});
@@ -392,6 +408,7 @@
 		}
 		if (data.refused) {
 			refusal = refusalMessage(data.refused, data.next_start);
+			refusalReason = data.refused;
 			view = 'refused';
 			return;
 		}
@@ -478,13 +495,26 @@
 <svelte:head><title>{view === 'playing' && current ? `${current.title} · Cubby` : 'Cubby'}</title></svelte:head>
 
 {#snippet tile(t: Tile)}
-	<button class="tile" onclick={() => open(t)}>
-		{#if thumb(t)}<img class="thumb" src={thumb(t)} alt="" />{:else}<span class="thumb blank"></span>{/if}
-		<span class="meta">
-			{#if localUrl(t.channel_avatar, origin)}<img class="avatar" src={localUrl(t.channel_avatar, origin)} alt="" />{/if}
-			<span class="title">{t.title}</span>
-		</span>
-	</button>
+	<div class="tilewrap">
+		<button class="tile" onclick={() => open(t)}>
+			{#if thumb(t)}<img class="thumb" src={thumb(t)} alt="" />{:else}<span class="thumb blank"></span>{/if}
+			<span class="meta">
+				{#if localUrl(t.channel_avatar, origin)}<img class="avatar" src={localUrl(t.channel_avatar, origin)} alt="" />{/if}
+				<span class="title">{t.title}</span>
+			</span>
+		</button>
+		<button
+			class="later"
+			class:on={saved[t.youtube_id]}
+			data-testid="save-later"
+			aria-pressed={!!saved[t.youtube_id]}
+			aria-label={saved[t.youtube_id] ? `Saved to Watch later: ${t.title}` : `Add to Watch later: ${t.title}`}
+			onclick={() => toggleSaved(t)}
+		>
+			<span aria-hidden="true">{saved[t.youtube_id] ? '✓' : '🕒'}</span>
+			<span>{saved[t.youtube_id] ? 'Saved' : 'Later'}</span>
+		</button>
+	</div>
 {/snippet}
 
 <main class="watch">
@@ -553,6 +583,12 @@
 				{#if sections.every((s) => s.tiles.length === 0) && recentRow.length === 0}
 					<p class="empty" data-testid="nothing-allowed">Nothing is allowed yet. Ask a grown-up to add some videos.</p>
 				{/if}
+				{#if later.length}
+					<section data-testid="watch-later-row">
+						<h2>Watch later</h2>
+						<div class="grid">{#each later as t (t.youtube_id)}{@render tile(t)}{/each}</div>
+					</section>
+				{/if}
 				{#if recentRow.length}
 					<section data-testid="recent-row">
 						<div class="searched">
@@ -581,6 +617,13 @@
 		{:else if view === 'refused'}
 			<div class="card" data-testid="refusal">
 				<h1>{refusal}</h1>
+				{#if current && canSaveForLater(refusalReason)}
+					{#if saved[current.youtube_id]}
+						<p class="saved-note" data-testid="saved-note">Saved! You can watch it later. 🎉</p>
+					{:else}
+						<button class="primary" data-testid="save-for-later" onclick={() => current && toggleSaved(current)}>🕒 Save it for later</button>
+					{/if}
+				{/if}
 				<button class="primary" onclick={back}>OK</button>
 			</div>
 		{:else if view === 'stopped'}
@@ -664,6 +707,11 @@
 	.rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; column-gap: var(--space-4); row-gap: 0; }
 	.rail > :global(*) { min-width: 0; }
 	.seeall { margin-left: auto; }
+	.tilewrap { position: relative; }
+	.tilewrap .tile { width: 100%; }
+	.later { position: absolute; top: var(--space-2); right: var(--space-2); display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch); padding: 0 var(--space-3); font-size: 1rem; box-shadow: var(--shadow); }
+	.later.on { background: var(--ok); border-color: var(--ok); color: var(--accent-text); }
+	.saved-note { font-size: 1.4rem; font-weight: 700; margin: 0 0 var(--space-4); }
 	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; min-height: 0; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
 	.thumb { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--surface-2); }
 	.meta { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3); }

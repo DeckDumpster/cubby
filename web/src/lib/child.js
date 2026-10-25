@@ -56,6 +56,19 @@ export function refusalMessage(
 	}
 }
 
+/** Only a refusal that is about time, not about the video itself, offers to save it for later. */
+/** @param {string} reason */
+export function canSaveForLater(reason) {
+	return reason !== 'not-allowed';
+}
+
+export const WATCH_LATER_PATH = '/api/child/playlists/watch_later/items';
+
+/** @param {string} id */
+export function watchLaterPath(id) {
+	return `${WATCH_LATER_PATH}/${encodeURIComponent(id)}`;
+}
+
 /** A url is kept only when it stays on `base`'s origin; the child DOM never points off it. */
 /**
  * @param {string | undefined} url

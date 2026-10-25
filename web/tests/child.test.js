@@ -9,7 +9,9 @@ import {
 	PLAYER_HOST,
 	beatDue,
 	endReason,
-	loadYT
+	loadYT,
+	canSaveForLater,
+	watchLaterPath
 } from '../src/lib/child.js';
 
 test('the pause card is for the CubbyShell user agent only', () => {
@@ -89,4 +91,10 @@ test('the page reads the server search payload as tiles', () => {
 test('parseRecent reads tiles and the more flag, and survives a bad payload', () => {
 	assert.deepEqual(parseRecent({ tiles: [{ youtube_id: 'a' }], more: true }), { tiles: [{ youtube_id: 'a' }], more: true });
 	assert.deepEqual(parseRecent(null), { tiles: [], more: false });
+});
+
+test('only a refusal that is not about the video itself offers Save it for later', () => {
+	for (const r of ['out-of-videos', 'out-of-minutes', 'not-now']) assert.equal(canSaveForLater(r), true);
+	assert.equal(canSaveForLater('not-allowed'), false);
+	assert.equal(watchLaterPath('a b'), '/api/child/playlists/watch_later/items/a%20b');
 });
