@@ -75,3 +75,20 @@ test('the page reads the server home payload: sections carry titled tiles', () =
 test('the page reads the server search payload as tiles', () => {
 	assert.equal(parseSearch(fixture('child-search.json'))[0].youtube_id, 'a');
 });
+
+import { moreAfterThis, startNotice, minutesLeft, timeNotice } from '../src/lib/child.js';
+
+test('notices: counts after this video, nudge stages', () => {
+	assert.strictEqual(moreAfterThis(3), 2);
+	assert.strictEqual(moreAfterThis(1.5), 0);
+	assert.strictEqual(moreAfterThis(null), null);
+	assert.strictEqual(startNotice(0), 'This is the last video.');
+	assert.strictEqual(startNotice(1), 'You can watch 1 more video after this one.');
+	assert.strictEqual(minutesLeft({ minutes: 9, window_left_s: 120 }), 2);
+	assert.strictEqual(minutesLeft({ minutes: null }), null);
+	assert.strictEqual(timeNotice(6, 0), null);
+	assert.deepEqual(timeNotice(4.9, 0), { text: 'After 5 more minutes, videos will stop.', stage: 1 });
+	assert.strictEqual(timeNotice(4.5, 1), null);
+	assert.deepEqual(timeNotice(0.9, 1), { text: 'After 1 more minute, videos will stop.', stage: 2 });
+	assert.strictEqual(timeNotice(0.5, 2), null);
+});
