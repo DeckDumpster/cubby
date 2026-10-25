@@ -33,7 +33,7 @@
 			{/each}
 		</ul>
 		<ActionButton run={() => ps.pair(c.id)} done="Pairing code ready for {c.name}" fail="make a pairing code">Pair a device</ActionButton>
-		{#if ps.pairing?.child === c.id}<p class="code" aria-label="Pairing code">{ps.pairing.code}</p>{/if}
+		{#if ps.pairing && ps.pairing.child === c.id}<p class="code" aria-label="Pairing code">{ps.pairing.code}</p>{/if}
 	</div>
 
 <style>
