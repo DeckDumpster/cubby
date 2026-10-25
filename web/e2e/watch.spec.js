@@ -32,6 +32,7 @@ const FAKE_PLAYER = () => {
 				return { video_id: this.vid ?? this.opts.videoId };
 			}
 			playVideo() {
+				if (window.__refuse) return;
 				this.played = (this.played ?? 0) + 1;
 			}
 			pauseVideo() {
@@ -106,7 +107,7 @@ test('the player is built only after a grant, with the privacy host and the LLD 
 	});
 	expect(opts.host).toBe('https://www.youtube-nocookie.com');
 	expect(opts.videoId).toBe('v1');
-	expect(opts.vars).toMatchObject({ autoplay: 0, rel: 0, playsinline: 1, fs: 0, iv_load_policy: 3, controls: 0, disablekb: 1 });
+	expect(opts.vars).toMatchObject({ autoplay: 1, rel: 0, playsinline: 1, fs: 0, iv_load_policy: 3, controls: 0, disablekb: 1 });
 });
 
 test('ENDED destroys the player and shows the end card with suggestions and the remaining budget', async ({ page }) => {
@@ -336,4 +337,29 @@ test('the end card renders inside the fullscreen container', async ({ page }) =>
 	await page.evaluate(() => window.__state(0));
 	await expect(page.getByTestId('fsbox').getByTestId('end-card')).toBeVisible();
 	expect(await page.evaluate(() => document.fullscreenElement?.getAttribute('data-testid'))).toBe('fsbox');
+});
+
+test('opening a video from a tile starts playback with no Play press', async ({ page }) => {
+	await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	await page.evaluate(() => window.__players[0].opts.events.onReady({}));
+	expect(await page.evaluate(() => window.__players[0].played)).toBe(1);
+	await page.evaluate(() => window.__state(1));
+	await expect(page.getByTestId('playpause')).toHaveAccessibleName('Pause');
+});
+
+test('autoplay refused clears the ready frame and leaves the Play control', async ({ page }) => {
+	await page.clock.install();
+	await page.addInitScript(() => (window.__refuse = true));
+	await setup(page);
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	await page.evaluate(() => window.__players[0].opts.events.onReady({}));
+	await expect(page.getByTestId('ready-frame')).toBeVisible();
+	await page.clock.runFor(3100);
+	await expect(page.getByTestId('ready-frame')).toHaveCount(0);
+	await expect(page.getByTestId('playpause')).toHaveAccessibleName('Play');
 });
