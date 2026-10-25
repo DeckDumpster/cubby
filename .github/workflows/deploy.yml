@@ -1,0 +1,59 @@
+name: Deploy
+
+# Deploys the commit that just landed on main to Cubby production on the mini PC. Merging is not
+# deploying on its own (the landing queue ends at main); this makes the two the same event.
+# Ported from dumpstar's deploy.yml.
+#
+# Runs ON THE BOX, on a runner labelled `cubby-prod` (deploy/runner-setup.sh), and moves the
+# production checkout ~/cubby-prod to the pushed sha before running deploy/deploy.sh from it, so the
+# checkout is never hand-moved. main only receives commits that already passed the gate, so this
+# does not re-run the suite. deploy.sh refuses on any host but deploy/prod-host and ends with the
+# user-path walk (deploy/smoke.sh); a failing walk fails this run.
+#
+# Until a runner with the `cubby-prod` label is registered the job waits; nothing else is affected.
+
+on:
+  push:
+    branches: [main]
+  # Redeploys the current main without a new commit. The job refuses any ref but main and shares
+  # the concurrency group below.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys must not overlap, and the evicted pending run is harmless: a deploy always ships the
+# newest main, so only the latest request matters.
+concurrency:
+  group: cubby-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, cubby-prod]
+    timeout-minutes: 45
+    env:
+      PROD_CHECKOUT: $HOME/cubby-prod
+      DEPLOY_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Move the production checkout to the pushed commit
+        run: |
+          set -euo pipefail
+          checkout="$(eval echo "$PROD_CHECKOUT")"
+          [ -d "$checkout/.git" ] || git init -q "$checkout"
+          git -C "$checkout" fetch -q "$GITHUB_WORKSPACE" "$DEPLOY_SHA"
+          git -C "$checkout" checkout -q -f -B main "$DEPLOY_SHA"
+          [ "$(git -C "$checkout" rev-parse HEAD)" = "$DEPLOY_SHA" ]
+      - name: Deploy prod and walk it
+        run: |
+          set -euo pipefail
+          checkout="$(eval echo "$PROD_CHECKOUT")"
+          bash "$checkout/deploy/deploy.sh"
+      - name: The deployed sha is the pushed sha
+        run: |
+          set -euo pipefail
+          checkout="$(eval echo "$PROD_CHECKOUT")"
+          [ "$(git -C "$checkout" rev-parse HEAD)" = "$DEPLOY_SHA" ]
+          curl -fsS http://127.0.0.1:8790/healthz

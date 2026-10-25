@@ -10,8 +10,20 @@ Developed by Spira (repo label `cubby`, local-only, lands on `local/main`).
 
 Cubby runs on **ubuntu-mini-0** (user `ryangantt`), never on the Spira box (agent-swarm-test).
 Production is `~/cubby-prod` there; `deploy/deploy.sh` runs from it and refuses on any host other
-than the one named in `deploy/prod-host`. Cubby has no git remote, so `deploy/push-prod.sh` ships
-`local/main` as a git bundle over ssh into `~/cubby-prod` and runs the deploy.
+than the one named in `deploy/prod-host`.
+
+Deploys are a GitHub Actions workflow, as in dumpstar: `.github/workflows/deploy.yml` runs on every
+push to `main` (and `workflow_dispatch`, main only) on the self-hosted runner labelled `cubby-prod`
+on that host. The workflow checks out the pushed sha, **syncs `~/cubby-prod` to it** (fetch from
+the runner workspace, `checkout -B main <sha>`; the prod checkout needs no remote), then runs
+`deploy/deploy.sh` from `~/cubby-prod`, which ends with the smoke walk (`deploy/smoke.sh`); a
+failing walk fails the run. Nothing hand-moves the prod checkout any more.
+
+The runner is installed by `deploy/runner-setup.sh` (rootless, user service `cubby-runner`). It needs a
+one-time registration token from a repo admin:
+`gh api -X POST repos/DeckDumpster/cubby/actions/runners/registration-token --jq .token`, then on
+the host `CUBBY_RUNNER_TOKEN=<token> deploy/runner-setup.sh`. `deploy/push-prod.sh` (bundle over ssh)
+remains only as the manual fallback while no runner is registered.
 
 ## Gate tools
 
