@@ -624,7 +624,7 @@
 	.empty { text-align: center; color: var(--text); background: var(--surface); border: 2px dashed var(--muted); border-radius: var(--radius); padding: var(--space-5); font-size: 1.4rem; }
 	.error { background: var(--danger-bg); color: var(--danger); border: 2px solid var(--danger); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin: 0; font-weight: 600; }
 
-	.stage { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; }
+	.stage { --chrome: 17rem; position: relative; width: min(100%, calc((100dvh - var(--chrome)) * 16 / 9)); margin: 0 auto; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; }
 	.player, .player :global(iframe) { width: 100%; height: 100%; border: 0; }
 	.player { pointer-events: none; }
 	.shield { position: absolute; inset: 0; touch-action: manipulation; cursor: default; }
@@ -640,6 +640,10 @@
 	@media (max-width: 700px) {
 		.badge { margin-left: 0; }
 		header { flex-wrap: wrap; }
+		.stage { --chrome: 21rem; }
+		.controls { gap: var(--space-2); }
+		.controls .big { min-width: 3.5rem; padding: 0 var(--space-2); }
+		.controls span { font-size: 0.95rem; }
 	}
 	.hello { font-size: 1.3rem; font-weight: 700; }
 	.me { font-size: 1.6rem; }
@@ -651,11 +655,11 @@
 	.hidden { display: none; }
 	.stage:has(.hidden) { background: var(--surface); }
 	.controls { display: flex; gap: var(--space-4); align-items: center; margin-top: var(--space-4); }
-	.controls input { flex: 1; min-height: var(--touch); padding: 0; accent-color: var(--accent); }
+	.controls input { flex: 1; min-width: 0; min-height: var(--touch); padding: 0; accent-color: var(--accent); }
 	.controls span { font-variant-numeric: tabular-nums; font-weight: 700; }
 	.fsbox.fs { background: var(--bg, var(--surface)); overflow: auto; padding: var(--space-3); box-sizing: border-box; display: flex; flex-direction: column; }
 	.fsbox.fill { position: fixed; inset: 0; z-index: 1000; width: 100dvw; height: 100dvh; padding: max(var(--space-3), env(safe-area-inset-top)) max(var(--space-3), env(safe-area-inset-right)) max(var(--space-3), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left)); }
-	.fsbox.fs .stage { aspect-ratio: auto; flex: 1; min-height: 0; }
+	.fsbox.fs .stage { aspect-ratio: auto; flex: 1; min-height: 0; width: 100%; margin: 0; }
 	.fsbox.fs h1.now, .fsbox.fs .actions { display: none; }
 	.big { font-size: 2rem; min-width: 5rem; min-height: 4rem; }
 </style>
