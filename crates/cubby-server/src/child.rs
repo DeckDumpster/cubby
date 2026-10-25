@@ -175,7 +175,7 @@ fn home_with(
         "child": child,
         "remaining": remaining,
         "saved": saved.iter().collect::<Vec<_>>(),
-        "watch_later": later.iter().map(|v| tile(v)).collect::<Vec<_>>(),
+        "watch_later": later.iter().map(tile).collect::<Vec<_>>(),
         "sections": [
             {"key": "continue", "title": "Keep watching", "tiles": cont},
             {"key": "liked_channels", "title": "From channels you like", "tiles": ranked(ranker, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
