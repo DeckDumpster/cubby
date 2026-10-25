@@ -444,14 +444,14 @@ async fn play_beat_and_http_telemetry_reach_the_otlp_sink() {
     };
     assert_eq!(refused[0].label("reason"), Some("not-allowed"));
 
-    // Move the last beat back 30s: far enough to measure watch time, well inside the 60s reap timeout.
+    // Move the last beat back 30s: far enough to measure watch time, well inside the 60s reap timeout; the beat moves 30s to match.
     conn.execute(
         "UPDATE play_grants SET last_beat_at = last_beat_at - 30",
         [],
     )
     .unwrap();
     let beat = format!("/api/child/grant/{id}/beat");
-    child_post(&e, &beat, &token, json!({"position_s": 60})).await;
+    child_post(&e, &beat, &token, json!({"position_s": 30})).await;
     let watch = f.wait_for("cubby_watch_seconds");
     assert!(watch[0].value > 0.0 && watch[0].label("child") == Some("c1"));
     let charge = f.wait_for("cubby_charge");
