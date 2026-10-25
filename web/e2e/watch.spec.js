@@ -389,3 +389,46 @@ test('a shield covers the iframe exactly, takes every tap and toggles playback; 
 	await page.getByTestId('shield').click();
 	expect(await page.evaluate(() => window.__players[0].paused)).toBe(true);
 });
+
+const SIZES = [
+	['ipad-landscape', 1180, 820],
+	['ipad-portrait', 820, 1180],
+	['phone', 390, 844]
+];
+for (const [name, width, height] of SIZES) {
+	test(`${name}: the video starts smaller so every control stays in view, fullscreen still fills`, async ({ page }) => {
+		await page.setViewportSize({ width, height });
+		await setup(page);
+		await page.goto('/watch');
+		await page.getByRole('button', { name: /First video/ }).click();
+		await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+		await page.evaluate(() => window.__state(1));
+		await expect(page.locator('.player')).toHaveAttribute('data-settled', 'true', { timeout: 8000 });
+		for (const el of [
+			page.getByTestId('playpause'),
+			page.getByRole('slider', { name: 'seek' }),
+			page.getByTestId('fullscreen'),
+			page.getByTestId('clock'),
+			page.getByTestId('badge')
+		]) {
+			const r = await el.boundingBox();
+			expect(r.x).toBeGreaterThanOrEqual(0);
+			expect(r.y).toBeGreaterThanOrEqual(0);
+			expect(r.x + r.width).toBeLessThanOrEqual(width);
+			expect(r.y + r.height).toBeLessThanOrEqual(height);
+		}
+		expect(await page.evaluate(() => scrollY)).toBe(0);
+		const s = await page.getByTestId('shield').boundingBox();
+		expect(s).toEqual(await page.locator('.player').boundingBox());
+		if (process.env.SHOTS_DIR) await page.screenshot({ path: `${process.env.SHOTS_DIR}/watch-${name}.png` });
+
+		await page.evaluate(() => {
+			Object.defineProperty(document, 'fullscreenEnabled', { value: false });
+			Object.defineProperty(document, 'webkitFullscreenEnabled', { value: false });
+		});
+		await page.getByTestId('fullscreen').click();
+		await expect(page.getByTestId('fsbox')).toHaveAttribute('data-fs', 'fill');
+		const st = await page.locator('.stage').boundingBox();
+		expect(st.width).toBeGreaterThan(width - 40);
+	});
+}
