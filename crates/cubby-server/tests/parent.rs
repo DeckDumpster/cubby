@@ -871,3 +871,84 @@ async fn an_empty_or_absurd_extra_grant_is_refused() {
         .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+impl Env {
+    async fn child_get(&self, token: &str, path: &str) -> (StatusCode, Value) {
+        let r = Request::get(path)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        self.call(r).await
+    }
+}
+
+#[tokio::test]
+async fn once_the_grace_is_over_the_child_api_refuses_browsing_until_a_grant() {
+    let e = env().await;
+    e.videos();
+    let (child, tok) = e.child_with_device().await;
+    e.parent(
+        "POST",
+        "/api/parent/policies",
+        Some(json!({"url": "https://www.youtube.com/channel/ch1"})),
+    )
+    .await;
+    let (s, _) = e
+        .parent(
+            "PUT",
+            &format!("/api/parent/children/{child}/budget"),
+            Some(json!({"video_equivalents": 0.0})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Budget spent: browsing works for the grace, with the countdown, and play is refused.
+    let (s, home) = e.child_get(&tok, "/api/child/home").await;
+    assert_eq!(s, StatusCode::OK, "{home}");
+    assert_eq!(home["limit"]["state"], "grace");
+    assert!(home["limit"]["grace_left_s"].as_i64().unwrap() > 100);
+    assert_eq!(e.child_play(&tok, "v1").await["refused"], "out-of-videos");
+    assert_eq!(e.child_get(&tok, "/api/child/search?q=one").await.0, StatusCode::OK);
+
+    // The grace is a family setting.
+    let (s, _) = e
+        .parent("PUT", "/api/parent/settings", Some(json!({"grace_minutes": 5})))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, st) = e.parent("GET", "/api/parent/settings", None).await;
+    assert_eq!(st["grace_minutes"], 5.0);
+    let (_, home) = e.child_get(&tok, "/api/child/home").await;
+    assert!(home["limit"]["grace_left_s"].as_i64().unwrap() > 200);
+    let (s, _) = e
+        .parent("PUT", "/api/parent/settings", Some(json!({"grace_minutes": 99})))
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Ten minutes on, the grace is over: every browse call is refused, on any device.
+    e.family()
+        .execute("UPDATE limit_reached SET reached_at = reached_at - 600", [])
+        .unwrap();
+    for p in [
+        "/api/child/home",
+        "/api/child/search?q=one",
+        "/api/child/next?after=v1",
+    ] {
+        let (s, v) = e.child_get(&tok, p).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{p}");
+        assert_eq!(v["error"], "locked");
+        assert_eq!(v["limit"]["state"], "locked");
+    }
+
+    // A parent grant lifts it at once.
+    let (s, _) = e
+        .parent(
+            "POST",
+            &format!("/api/parent/children/{child}/extra"),
+            Some(json!({"videos": 1})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, home) = e.child_get(&tok, "/api/child/home").await;
+    assert_eq!(s, StatusCode::OK, "{home}");
+    assert_eq!(home["limit"]["state"], "open");
+}

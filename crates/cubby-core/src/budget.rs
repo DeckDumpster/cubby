@@ -17,6 +17,9 @@ pub const BEAT_TIMEOUT_S: i64 = 60;
 /// Grace given to the page to stop after a mid-play cutoff, unless the window closed.
 pub const CUTOFF_GRACE_S: u32 = 60;
 
+/// How long a child may keep browsing, unable to play, once the limit is reached.
+pub const DEFAULT_GRACE_S: i64 = 120;
+
 /// Minutes of watch time that make one video equivalent, unless the parent says otherwise.
 pub const DEFAULT_VE_MINUTES: f64 = 15.0;
 
@@ -140,6 +143,45 @@ pub fn cutoff(b: &Budget, u: Usage, tz: &str, now: i64) -> Option<u32> {
     let r = remaining(b, u);
     let spent = r.videos.is_some_and(|v| v <= 0.0) || r.minutes.is_some_and(|m| m <= 0.0);
     spent.then_some(CUTOFF_GRACE_S)
+}
+
+/// What a child may do right now, given when the limit was reached.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// Under the limit and inside the viewing window.
+    Open,
+    /// Limit reached: browse and save, but not play, until `ends_at`.
+    Grace { ends_at: i64 },
+    /// The grace is over: nothing is reachable until the budget resets or a grant.
+    Locked,
+}
+
+/// When the child's limit was reached, if it is reached at `now`: either budget spent, or the
+/// viewing window closed. For a spent budget this is `now` (the caller keeps the first sighting);
+/// for a closed window it is when the window last closed today, or local midnight before the
+/// first one of the day opens.
+pub fn limit_reached_at(b: &Budget, u: Usage, tz: &str, now: i64) -> Option<i64> {
+    if next_window_start(&b.daily_windows, tz, now).is_some() {
+        let midnight = day_start(tz, now);
+        let closed = b
+            .daily_windows
+            .iter()
+            .map(|&(_, e)| midnight + i64::from(e) * 60)
+            .filter(|&t| t <= now)
+            .max();
+        return Some(closed.unwrap_or(midnight));
+    }
+    let r = remaining(b, u);
+    let spent = r.videos.is_some_and(|v| v <= 0.0) || r.minutes.is_some_and(|m| m <= 0.0);
+    spent.then_some(now)
+}
+
+pub fn access(reached_at: Option<i64>, grace_s: i64, now: i64) -> Access {
+    match reached_at {
+        None => Access::Open,
+        Some(t) if now < t + grace_s => Access::Grace { ends_at: t + grace_s },
+        Some(_) => Access::Locked,
+    }
 }
 
 /// The unix time of the most recent local midnight at or before `now` in `tz`. A zone or instant
@@ -295,6 +337,31 @@ mod tests {
             Some(NOON_UTC + 7 * 3600)
         );
         assert_eq!(current_window_end(&w, "UTC", NOON_UTC + 8 * 3600), None);
+    }
+
+    #[test]
+    fn the_limit_is_reached_when_a_budget_is_spent_or_the_window_closes() {
+        let spent = Usage { charge: 3.0, watched_s: 0.0 };
+        assert_eq!(limit_reached_at(&budget(), Usage::default(), "UTC", NOON_UTC), None);
+        assert_eq!(limit_reached_at(&budget(), spent, "UTC", NOON_UTC), Some(NOON_UTC));
+        let b = Budget { daily_windows: vec![(7 * 60, 11 * 60)], ..budget() };
+        assert_eq!(
+            limit_reached_at(&b, Usage::default(), "UTC", NOON_UTC),
+            Some(NOON_UTC - 3600)
+        );
+        let early = Budget { daily_windows: vec![(13 * 60, 19 * 60)], ..budget() };
+        assert_eq!(
+            limit_reached_at(&early, Usage::default(), "UTC", NOON_UTC),
+            Some(day_start("UTC", NOON_UTC))
+        );
+    }
+
+    #[test]
+    fn access_is_open_then_grace_then_locked() {
+        assert_eq!(access(None, 120, 500), Access::Open);
+        assert_eq!(access(Some(100), 120, 219), Access::Grace { ends_at: 220 });
+        assert_eq!(access(Some(100), 120, 220), Access::Locked);
+        assert_eq!(access(Some(100), 0, 100), Access::Locked);
     }
 
     #[test]
