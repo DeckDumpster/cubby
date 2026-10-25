@@ -31,6 +31,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/parent/children/{id}", put(edit_child))
         .route("/api/parent/children/{id}/budget", put(set_budget))
         .route("/api/parent/children/{id}/extra", post(grant_extra))
+        .route(
+            "/api/parent/children/{id}/extra/{grant}",
+            delete(remove_extra),
+        )
         .route("/api/parent/children/{id}/history", get(child_history))
         .route("/api/parent/policies", get(policies).post(add_policy))
         .route("/api/parent/policies/preview", post(preview))
@@ -276,6 +280,25 @@ async fn set_settings(
     crate::play::set_grace_s(&conn(&s, &f)?, (b.grace_minutes * 60.0).round() as i64)
         .map_err(ApiError::internal)?;
     Ok(Json(json!({"ok": true})))
+}
+
+/// Undoes an extra grant by appending a reversal; the grant stays in the history, marked removed.
+/// Removing it again, or after it has lapsed, changes nothing.
+async fn remove_extra(
+    State(s): State<Arc<AppState>>,
+    Extension(f): Extension<ParentOf>,
+    actor: Option<Extension<crate::Actor>>,
+    Path((id, grant)): Path<(String, String)>,
+) -> Result<Json<Value>> {
+    let c = conn(&s, &f)?;
+    let by = actor.and_then(|Extension(a)| a.get()).map_or_else(
+        || "parent".to_string(),
+        |w| w.trim_start_matches("parent:").to_string(),
+    );
+    if !crate::play::reverse_grant(&c, &id, &grant, &by, unix_now()).map_err(ApiError::internal)? {
+        return Err(not_found("grant"));
+    }
+    Ok(Json(json!({"id": grant})))
 }
 
 async fn child_history(

@@ -367,3 +367,28 @@ test('title filters are separate phrase chips and the count stays after saving',
 	await expect(page.getByText('filtered out')).toBeVisible();
 	if (shots) await page.screenshot({ path: `${shots}/title-filters-390.png`, fullPage: true });
 });
+
+test('grant history offers (Remove) on a live grant and shows a removed one struck through', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	let removed = null;
+	const grants = [
+		{ id: 'ga', at: 1792880000, expires_at: 1792900000, minutes: 15, videos: 0, by: 'test@example.com', note: null, removed_at: null, removed_by: null },
+		{ id: 'gb', at: 1792870000, expires_at: 1792900000, minutes: 0, videos: 1, by: 'test@example.com', note: null, removed_at: 1792875000, removed_by: 'test@example.com' }
+	];
+	await page.route('**/api/parent/**', (route) => {
+		const r = route.request();
+		const u = r.url();
+		if (r.method() === 'DELETE') { removed = u.split('/').pop(); return route.fulfill({ json: { id: removed } }); }
+		const body = u.includes('/progress') ? [{ ...PROGRESS[0], grants }, PROGRESS[1]] : u.includes('/children') ? CHILDREN : u.includes('/policies') ? POLICIES : [];
+		return route.fulfill({ json: body });
+	});
+	await page.goto('/parent');
+	const maya = page.getByRole('article', { name: 'Maya progress' });
+	await expect(maya.getByRole('button', { name: '(Remove)' })).toHaveCount(1);
+	await expect(maya).toContainText('removed by test@example.com');
+	const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+	expect(overflow).toBe(false);
+	if (shots) await maya.screenshot({ path: `${shots}/grant-ledger-390.png` });
+	await maya.getByRole('button', { name: '(Remove)' }).click();
+	await expect.poll(() => removed).toBe('ga');
+});

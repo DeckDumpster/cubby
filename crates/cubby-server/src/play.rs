@@ -75,7 +75,8 @@ fn load_budget(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Bud
 fn extras(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<(f64, f64)> {
     conn.query_row(
         "SELECT COALESCE(SUM(videos),0), COALESCE(SUM(minutes),0) FROM budget_grants
-         WHERE child_id=?1 AND granted_at<=?2 AND expires_at>?2",
+         WHERE child_id=?1 AND granted_at<=?2 AND expires_at>?2
+           AND id NOT IN (SELECT grant_id FROM budget_grant_reversals)",
         params![child, now],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
@@ -100,6 +101,34 @@ pub(crate) fn grant_extra(
         params![id, child, now, budget::next_midnight(&tz, now), minutes, videos, by, note],
     )?;
     Ok(id)
+}
+
+/// Undoes a grant still in effect by appending a reversal; the grant's own row is never touched.
+/// Returns whether the grant belongs to `child`. Reversing twice, or an expired grant, records
+/// nothing more.
+pub(crate) fn reverse_grant(
+    conn: &Connection,
+    child: &str,
+    grant: &str,
+    by: &str,
+    now: i64,
+) -> rusqlite::Result<bool> {
+    let found = conn
+        .query_row(
+            "SELECT 1 FROM budget_grants WHERE id=?1 AND child_id=?2",
+            params![grant, child],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if found {
+        conn.execute(
+            "INSERT OR IGNORE INTO budget_grant_reversals(grant_id,reversed_at,reversed_by)
+             SELECT id, ?2, ?3 FROM budget_grants WHERE id=?1 AND expires_at>?2",
+            params![grant, now, by],
+        )?;
+    }
+    Ok(found)
 }
 
 fn load_base_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
@@ -473,8 +502,10 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
             "reached": left.is_some_and(|l| l <= 0.0)})
     };
     let mut q = conn.prepare(
-        "SELECT id, granted_at, expires_at, minutes, videos, granted_by, note FROM budget_grants
-         WHERE child_id=?1 AND expires_at>?2 ORDER BY granted_at DESC, rowid DESC",
+        "SELECT g.id, g.granted_at, g.expires_at, g.minutes, g.videos, g.granted_by, g.note,
+                x.reversed_at, x.reversed_by
+         FROM budget_grants g LEFT JOIN budget_grant_reversals x ON x.grant_id=g.id
+         WHERE g.child_id=?1 AND g.expires_at>?2 ORDER BY g.granted_at DESC, g.rowid DESC",
     )?;
     let grants = q
         .query_map(params![child, now], |r| {
@@ -482,7 +513,9 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
                 json!({"id": r.get::<_, String>(0)?, "at": r.get::<_, i64>(1)?,
                 "expires_at": r.get::<_, i64>(2)?, "minutes": r.get::<_, f64>(3)?,
                 "videos": r.get::<_, f64>(4)?, "by": r.get::<_, String>(5)?,
-                "note": r.get::<_, Option<String>>(6)?}),
+                "note": r.get::<_, Option<String>>(6)?,
+                "removed_at": r.get::<_, Option<i64>>(7)?,
+                "removed_by": r.get::<_, Option<String>>(8)?}),
             )
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1092,5 +1125,34 @@ mod tests {
             end(&c, &dev(), &id, "boredom", T0),
             Err(PlayError::BadInput("reason"))
         );
+    }
+}
+
+#[cfg(test)]
+mod reversal_tests {
+    use super::*;
+
+    #[test]
+    fn an_expired_grant_is_not_reversed_and_a_reversal_is_recorded_once() {
+        let mut c = Connection::open_in_memory().unwrap();
+        cubby_db::family::migrate_family(&mut c).unwrap();
+        c.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             INSERT INTO budget_grants(id,child_id,granted_at,expires_at,minutes,videos,granted_by)
+             VALUES ('old','k',0,100,5,0,'p'),('new','k',0,1000,5,0,'p');",
+        )
+        .unwrap();
+        assert!(reverse_grant(&c, "k", "old", "p", 500).unwrap());
+        assert!(reverse_grant(&c, "k", "new", "p", 500).unwrap());
+        assert!(reverse_grant(&c, "k", "new", "q", 600).unwrap());
+        assert!(!reverse_grant(&c, "other", "new", "p", 500).unwrap());
+        let rows: Vec<(String, String)> = c
+            .prepare("SELECT grant_id, reversed_by FROM budget_grant_reversals")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, [("new".to_string(), "p".to_string())]);
     }
 }
