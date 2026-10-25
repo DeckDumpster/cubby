@@ -21,6 +21,7 @@ const GOOD_N: &str = include_str!("../fixtures/good.n");
 const KID: &str = "test-key";
 pub const CLIENT_ID: &str = "cubby-client";
 pub const CLIENT_SECRET: &str = "s3cret";
+pub const SESSION_KEY: &str = "test-session-key-0123456789abcdef0123";
 pub const BASE_URL: &str = "https://cubby.example";
 pub const GROUP: &str = "cubby-parents";
 
@@ -141,6 +142,7 @@ impl Provider {
             "CUBBY_OIDC_CLIENT_ID" => Some(CLIENT_ID.into()),
             "CUBBY_OIDC_CLIENT_SECRET" => Some(CLIENT_SECRET.into()),
             "CUBBY_OIDC_BASE_URL" => Some(BASE_URL.into()),
+            "CUBBY_SESSION_KEY" => Some(SESSION_KEY.into()),
             _ => None,
         }
     }

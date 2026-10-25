@@ -12,13 +12,14 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use hmac::{Hmac, Mac};
 use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::Deserialize;
@@ -52,7 +53,11 @@ pub struct OidcConfig {
     /// The provider group a parent must be in.
     pub group: String,
     pub session_ttl: Duration,
+    /// Keys the HMAC on the session cookie; at least `MIN_SESSION_KEY_LEN` bytes.
+    pub session_key: String,
 }
+
+pub const MIN_SESSION_KEY_LEN: usize = 32;
 
 #[derive(Deserialize, Clone)]
 struct Discovery {
@@ -78,11 +83,23 @@ struct Pending {
     created: Instant,
 }
 
+/// What the signed cookie carries.
+#[derive(serde::Serialize, Deserialize)]
 struct Session {
+    #[serde(rename = "e")]
     email: String,
     /// Handed back to the provider as `id_token_hint` when the parent signs out.
+    #[serde(rename = "t")]
     id_token: String,
-    expires: Instant,
+    /// Unix seconds.
+    #[serde(rename = "x")]
+    expires: u64,
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 #[derive(Deserialize)]
@@ -102,13 +119,40 @@ pub struct OidcState {
     discovery: RwLock<Option<Arc<Discovery>>>,
     keys: RwLock<Option<KeyCache>>,
     pending: Mutex<HashMap<String, Pending>>,
-    sessions: Mutex<HashMap<String, Session>>,
+    /// Signatures of cookies logged out before they expired, with their expiry (unix seconds).
+    revoked: Mutex<HashMap<String, u64>>,
 }
 
 fn random_hex(bytes: usize) -> String {
     let mut b = vec![0u8; bytes];
     getrandom::fill(&mut b).expect("the OS random source is unavailable");
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn base64url_decode(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'-' => Some(62),
+        b'_' => Some(63),
+        _ => None,
+    };
+    let b = s.as_bytes();
+    if b.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(b.len() * 3 / 4);
+    for c in b.chunks(4) {
+        let mut n = 0u32;
+        for (i, x) in c.iter().enumerate() {
+            n |= (val(*x)? as u32) << (18 - 6 * i);
+        }
+        for i in 0..c.len() - 1 {
+            out.push((n >> (16 - 8 * i)) as u8);
+        }
+    }
+    Some(out)
 }
 
 fn base64url(data: &[u8]) -> String {
@@ -155,7 +199,7 @@ impl OidcState {
             discovery: RwLock::new(None),
             keys: RwLock::new(None),
             pending: Mutex::new(HashMap::new()),
-            sessions: Mutex::new(HashMap::new()),
+            revoked: Mutex::new(HashMap::new()),
         }
     }
 
@@ -307,42 +351,62 @@ impl OidcState {
         Ok(claims)
     }
 
+    fn mac(&self) -> Hmac<Sha256> {
+        Hmac::<Sha256>::new_from_slice(self.cfg.session_key.as_bytes())
+            .expect("HMAC accepts a key of any length")
+    }
+
+    /// The cookie value for a new session: `<payload>.<signature>`, both base64url.
     fn open_session(&self, email: &str, id_token: &str) -> String {
-        let token = random_hex(32);
-        let now = Instant::now();
-        let mut s = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        s.retain(|_, v| v.expires > now);
-        s.insert(
-            token.clone(),
-            Session {
+        let payload = base64url(
+            &serde_json::to_vec(&Session {
                 email: email.to_string(),
                 id_token: id_token.to_string(),
-                expires: now + self.cfg.session_ttl,
-            },
+                expires: unix_now() + self.cfg.session_ttl.as_secs(),
+            })
+            .expect("a session serialises"),
         );
-        token
+        let mut mac = self.mac();
+        mac.update(payload.as_bytes());
+        format!("{payload}.{}", base64url(&mac.finalize().into_bytes()))
+    }
+
+    /// The session in `token`, if its signature holds, it has not expired and it was not logged out.
+    fn verify(&self, token: &str) -> Option<Session> {
+        let (payload, sig) = token.split_once('.')?;
+        let mut mac = self.mac();
+        mac.update(payload.as_bytes());
+        mac.verify_slice(&base64url_decode(sig)?).ok()?;
+        let s: Session = serde_json::from_slice(&base64url_decode(payload)?).ok()?;
+        if s.expires <= unix_now() {
+            return None;
+        }
+        if self
+            .revoked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(sig)
+        {
+            return None;
+        }
+        Some(s)
     }
 
     /// The email of the live session behind `token`, if any.
     pub fn session_email(&self, token: &str) -> Option<String> {
-        let mut s = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        match s.get(token) {
-            Some(v) if v.expires > Instant::now() => Some(v.email.clone()),
-            Some(_) => {
-                s.remove(token);
-                None
-            }
-            None => None,
-        }
+        self.verify(token).map(|s| s.email)
     }
 
-    /// Drops the session and returns the ID token it was opened with.
+    /// Ends the session and returns the ID token it was opened with.
     fn end_session(&self, token: &str) -> Option<String> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(token)
-            .map(|s| s.id_token)
+        let s = self.verify(token)?;
+        let now = unix_now();
+        let mut r = self.revoked.lock().unwrap_or_else(|e| e.into_inner());
+        r.retain(|_, x| *x > now);
+        if let Some((_, sig)) = token.split_once('.') {
+            r.insert(sig.to_string(), s.expires);
+        }
+        Some(s.id_token)
     }
 
     fn cookie(&self, value: &str, max_age: u64) -> HeaderValue {
@@ -354,7 +418,7 @@ impl OidcState {
         HeaderValue::from_str(&format!(
             "{SESSION_COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}"
         ))
-        .expect("a hex cookie value is a valid header")
+        .expect("a base64url cookie value is a valid header")
     }
 }
 
