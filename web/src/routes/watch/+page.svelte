@@ -547,6 +547,8 @@
 					<h1 class="now">{current.title}</h1>
 					<div class="stage">
 						<div class="player" class:hidden={paused} class:unsettled={!settled && !blocked} data-settled={settled} bind:this={host}></div>
+						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+						<div class="shield" data-testid="shield" aria-hidden="true" onclick={toggle}></div>
 						{#if !settled && !paused && !blocked}
 							<div class="ready" data-testid="ready-frame"><h2 class="break">Getting your video ready…</h2></div>
 						{/if}
@@ -624,6 +626,8 @@
 
 	.stage { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; }
 	.player, .player :global(iframe) { width: 100%; height: 100%; border: 0; }
+	.player { pointer-events: none; }
+	.shield { position: absolute; inset: 0; touch-action: manipulation; cursor: default; }
 	.player.unsettled { visibility: hidden; }
 	.ready { position: absolute; inset: 0; background: var(--surface); display: flex; align-items: center; justify-content: center; }
 	.pause { position: absolute; inset: 0; background: var(--surface); display: flex; flex-direction: column; gap: var(--space-4); align-items: center; justify-content: center; }
