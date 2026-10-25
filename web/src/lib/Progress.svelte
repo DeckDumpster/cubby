@@ -113,7 +113,6 @@
 					<input type="number" min="0" step="0.5" inputmode="decimal" placeholder="videos" aria-label="Extra videos" value={custom[r.child_id]?.videos ?? ''} oninput={(ev) => (custom[r.child_id] = { ...custom[r.child_id], minutes: custom[r.child_id]?.minutes ?? '', videos: ev.currentTarget.value })} />
 					<button type="submit">Add</button>
 				</form>
-				<small>Extra lasts until midnight. It does not open a closed viewing window.</small>
 				{#if failed}<p class="state" role="alert">{failed}</p>{/if}
 				{#if r.grants?.length}
 					<ul class="grants" aria-label="Extra given today">
@@ -124,9 +123,6 @@
 							</li>
 						{/each}
 					</ul>
-				{/if}
-				{#if r.resets_at && (r.videos.limit !== null || r.minutes.limit !== null)}
-					<p class="muted">Resets at midnight</p>
 				{/if}
 			</article>
 		{/each}
