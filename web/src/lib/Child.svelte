@@ -38,7 +38,7 @@
 	const SHOWN = 8;
 	const origin = typeof location === 'undefined' ? 'http://localhost' : location.origin;
 
-	let paired = $state(true);
+	let paired = $state(!!token.get());
 	let code = $state('');
 	let pairError = $state('');
 	let child = $state<{ name?: string; avatar?: string }>({});
@@ -52,7 +52,7 @@
 	let results = $state<Tile[] | null>(null);
 	let searched = $state('');
 	let error = $state('');
-	// "Recently watched": a one-row preview on home, the full paged list at /watch?recent=1.
+	// "Recently watched": a one-row preview on home, the full paged list at /recent.
 	let recentRow = $state<Tile[]>([]);
 	let recentRowMore = $state(false);
 	let recentAll = $state<Tile[]>([]);
@@ -182,15 +182,12 @@
 	}
 
 	function seeAll() {
-		goto('/watch?recent=1', { noScroll: false });
+		goto('/recent');
 	}
 
 	onMount(() => {
 		paired = !!token.get();
-		if (paired) {
-			loadHome();
-			if (urlQuery) runSearch(urlQuery);
-		}
+		if (paired) loadHome();
 		const leave = () => leaveWatch();
 		const fsChange = () => {
 			if (fsMode === 'api' && !fsElement()) fsMode = 'off';
@@ -215,7 +212,6 @@
 			token.set(data.token);
 			paired = true;
 			await loadHome();
-			if (urlQuery) runSearch(urlQuery);
 		} else {
 			pairError = 'That code did not work. Ask a grown-up for a new one.';
 		}
@@ -230,10 +226,38 @@
 		code = '';
 	}
 
-	// The URL is the search state: /watch is home, /watch?q=... is a search, so back leaves it.
-	const urlQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
-	const showRecent = $derived(page.url.searchParams.get('recent') === '1' && !urlQuery);
+	// The URL is the place: / is home, /?q=... a search, /recent the full history, /videos/{id} a video.
+	const path = $derived(page.url.pathname);
+	const urlQuery = $derived(path === '/' ? (page.url.searchParams.get('q')?.trim() ?? '') : '');
+	const showRecent = $derived(path === '/recent');
+	const videoId = $derived(path.startsWith('/videos/') ? decodeURIComponent(path.slice('/videos/'.length)) : '');
 	let searchSeq = 0;
+	// The tile that was clicked, so its title is known before the play answer arrives.
+	let picked: Tile | null = null;
+
+	$effect(() => {
+		const id = videoId;
+		if (paired) untrack(() => sync(id));
+	});
+
+	async function sync(id: string) {
+		if (id) {
+			if (current?.youtube_id === id && view !== 'grid') return;
+			const t = picked?.youtube_id === id ? picked : { youtube_id: id, title: '' };
+			picked = null;
+			await open(t);
+		} else if (view !== 'grid') {
+			await toGrid();
+		}
+	}
+
+	async function toGrid() {
+		exitFullscreen();
+		await leaveWatch();
+		view = 'grid';
+		current = null;
+		await loadHome();
+	}
 
 	$effect(() => {
 		if (showRecent && untrack(() => paired)) untrack(() => loadRecentPage(true));
@@ -299,12 +323,12 @@
 		e.preventDefault();
 		const q = query.trim();
 		if (q === urlQuery) return;
-		goto(q ? `/watch?q=${encodeURIComponent(q)}` : '/watch', { keepFocus: true, noScroll: true });
+		goto(q ? `/?q=${encodeURIComponent(q)}` : '/', { keepFocus: true, noScroll: true });
 	}
 
 	function home() {
 		query = '';
-		if (urlQuery) goto('/watch', { noScroll: true });
+		if (urlQuery) goto('/', { noScroll: true });
 	}
 
 	function onSearchInput() {
@@ -496,12 +520,9 @@
 		await closeGrant('left');
 	}
 
-	async function back() {
-		exitFullscreen();
-		await leaveWatch();
-		view = 'grid';
-		current = null;
-		await loadHome();
+	function back() {
+		if (videoId) goto('/');
+		else toGrid();
 	}
 
 	async function open(tile: Tile) {
@@ -510,8 +531,11 @@
 		view = 'loading';
 		const { status, data } = await guarded(api('/api/child/play', { body: { youtube_id: tile.youtube_id } }));
 		if (status !== 200) {
-			error = 'Something went wrong. Try again.';
 			view = 'grid';
+			// A stale token keeps the URL: pairing again opens the same video.
+			if (!paired) return;
+			error = 'Something went wrong. Try again.';
+			goto('/', { replaceState: true });
 			return;
 		}
 		if (data.refused) {
@@ -522,6 +546,7 @@
 			return;
 		}
 		grantId = data.grant_id;
+		if (data.title && !current?.title) current = { ...tile, title: data.title };
 		remaining = data.remaining ?? remaining;
 		nudgeStage = 0;
 		prevVideos = data.remaining?.videos ?? null;
@@ -556,6 +581,7 @@
 			await closeGrant('left');
 			error = 'The video player could not start.';
 			view = 'grid';
+			goto('/', { replaceState: true });
 		}
 	}
 
@@ -617,17 +643,17 @@
 	}
 </script>
 
-<svelte:head><title>{view === 'playing' && current ? `${current.title} · Cubby` : 'Cubby'}</title></svelte:head>
+<svelte:head><title>{videoId && current?.title ? `${current.title} · Cubby` : showRecent ? 'Recently watched · Cubby' : 'Cubby'}</title></svelte:head>
 
 {#snippet tile(t: Tile)}
 	<div class="tilewrap">
-		<button class="tile" onclick={() => open(t)}>
+		<a class="tile" href="/videos/{encodeURIComponent(t.youtube_id)}" onclick={() => (picked = t)}>
 			{#if thumb(t)}<img class="thumb" src={thumb(t)} alt="" />{:else}<span class="thumb blank"></span>{/if}
 			<span class="meta">
 				{#if localUrl(t.channel_avatar, origin)}<img class="avatar" src={localUrl(t.channel_avatar, origin)} alt="" />{/if}
 				<span class="title">{t.title}</span>
 			</span>
-		</button>
+		</a>
 		<button
 			class="later"
 			class:on={saved[t.youtube_id]}
@@ -725,7 +751,7 @@
 				</section>
 			{:else if showRecent}
 				<div class="searched">
-					<button type="button" class="home" onclick={() => goto('/watch')}>← Home</button>
+					<button type="button" class="home" onclick={() => goto('/')}>← Home</button>
 					<h2>Recently watched</h2>
 				</div>
 				{#if recentAll.length === 0 && !recentLoading}<p class="empty">Nothing watched yet.</p>{/if}
@@ -890,7 +916,7 @@
 	.later { position: absolute; top: var(--space-2); right: var(--space-2); display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch); padding: 0 var(--space-3); font-size: 1rem; box-shadow: var(--shadow); }
 	.later.on { background: var(--ok); border-color: var(--ok); color: var(--accent-text); }
 	.saved-note { font-size: 1.4rem; font-weight: 700; margin: 0 0 var(--space-4); }
-	.tile { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; min-height: 0; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
+	.tile { display: flex; text-decoration: none; color: inherit; flex-direction: column; text-align: left; padding: 0; overflow: hidden; min-height: 0; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
 	.thumb { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--surface-2); }
 	.meta { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3); }
 	.avatar { width: 2rem; height: 2rem; border-radius: 50%; flex: none; }

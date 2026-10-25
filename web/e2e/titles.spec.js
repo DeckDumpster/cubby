@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const ROUTES = ['/', '/watch', '/signed-out', '/parent/children', '/parent/allow', '/parent/review', '/parent/history', '/parent/requests'];
+const ROUTES = ['/', '/recent', '/signed-out', '/parent/children', '/parent/allow', '/parent/review', '/parent/history', '/parent/requests'];
 
 for (const route of ROUTES)
 	test(`${route} sets a page title`, async ({ page }) => {
