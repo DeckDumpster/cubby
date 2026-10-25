@@ -448,7 +448,10 @@ for (const [name, size] of [['ipad', { width: 820, height: 1180 }], ['phone', { 
 		await page.goto('/watch');
 		const row = page.getByTestId('recent-row');
 		await expect(row).toBeVisible();
-		const tops = await row.locator('.tile').evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height > 0).map((e) => Math.round(e.getBoundingClientRect().top)));
+		const tops = await row.locator('.tile').evaluateAll((els) => {
+			const rail = els[0].parentElement.getBoundingClientRect();
+			return els.filter((e) => e.getBoundingClientRect().top < rail.bottom - 1).map((e) => Math.round(e.getBoundingClientRect().top));
+		});
 		expect(tops.length).toBeGreaterThan(0);
 		expect(new Set(tops).size).toBe(1);
 		await page.screenshot({ path: `../docs/screenshots/recent/row-${name}.png` });
