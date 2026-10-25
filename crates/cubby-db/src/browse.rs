@@ -148,7 +148,10 @@ pub fn request_more_from_channel(
     channel_id: &str,
     now: i64,
 ) -> rusqlite::Result<Option<ChannelAsk>> {
-    let Some(newest) = channel_videos(conn, child_id, channel_id)?.into_iter().next() else {
+    let Some(newest) = channel_videos(conn, child_id, channel_id)?
+        .into_iter()
+        .next()
+    else {
         return Ok(None);
     };
     let state = channel_ask(conn, child_id, channel_id)?;
@@ -385,7 +388,10 @@ mod tests {
             ch.iter().map(|c| c.channel_id.as_str()).collect::<Vec<_>>(),
             ["Alpha", "Beta"]
         );
-        assert_eq!(ids(channel_videos(&c, "kid", "Alpha").unwrap()), ["a2", "a1"]);
+        assert_eq!(
+            ids(channel_videos(&c, "kid", "Alpha").unwrap()),
+            ["a2", "a1"]
+        );
         assert!(channel_videos(&c, "kid", "Gamma").unwrap().is_empty());
     }
 
@@ -397,15 +403,25 @@ mod tests {
         allow(&c, "a1", "kid", "approved");
         assert_eq!(
             request_more_from_channel(&c, "kid", "Alpha", 7).unwrap(),
-            Some(ChannelAsk { imported: false, requested: true })
+            Some(ChannelAsk {
+                imported: false,
+                requested: true
+            })
         );
         request_more_from_channel(&c, "kid", "Alpha", 8).unwrap();
         let n: i64 = c
-            .query_row("SELECT COUNT(*) FROM requests WHERE kind='more-from-channel'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM requests WHERE kind='more-from-channel'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 1);
         assert!(!channel_ask(&c, "sib", "Alpha").unwrap().requested);
-        assert_eq!(request_more_from_channel(&c, "sib", "Alpha", 9).unwrap(), None);
+        assert_eq!(
+            request_more_from_channel(&c, "sib", "Alpha", 9).unwrap(),
+            None
+        );
 
         c.execute_batch("INSERT INTO allow_policies VALUES('cp','channel','Alpha','kid',0,NULL);")
             .unwrap();

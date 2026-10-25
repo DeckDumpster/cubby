@@ -384,7 +384,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
             put(playlist_add_route).delete(playlist_remove_route),
         )
         .route("/api/child/channel/{id}", get(channel_route))
-        .route("/api/child/channel/{id}/request", post(channel_request_route))
+        .route(
+            "/api/child/channel/{id}/request",
+            post(channel_request_route),
+        )
 }
 
 #[derive(Deserialize)]
@@ -468,6 +471,7 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 }
 
 /// Browsing is refused once the grace is over; the body carries the limit so the page can say so.
+#[allow(clippy::result_large_err)] // axum's Response is the error a handler returns; boxing it buys nothing here
 fn guard_locked(conn: &Connection, child: &str, now: i64) -> Result<Value, Response> {
     let limit =
         crate::play::limit_json(conn, child, now).map_err(|e| internal(e).into_response())?;
@@ -481,6 +485,7 @@ fn guard_locked(conn: &Connection, child: &str, now: i64) -> Result<Value, Respo
     Ok(limit)
 }
 
+#[allow(clippy::result_large_err)] // axum's Response is the error a handler returns; boxing it buys nothing here
 async fn home_route(
     State(state): State<Arc<AppState>>,
     Extension(ParentOf(family_id)): Extension<ParentOf>,
@@ -497,6 +502,7 @@ async fn home_route(
     Ok(Json(v))
 }
 
+#[allow(clippy::result_large_err)] // axum's Response is the error a handler returns; boxing it buys nothing here
 async fn search_route(
     State(state): State<Arc<AppState>>,
     Extension(ParentOf(family_id)): Extension<ParentOf>,
@@ -513,6 +519,7 @@ async fn search_route(
     })))
 }
 
+#[allow(clippy::result_large_err)] // axum's Response is the error a handler returns; boxing it buys nothing here
 async fn recent_route(
     State(state): State<Arc<AppState>>,
     Extension(ParentOf(family_id)): Extension<ParentOf>,
@@ -526,6 +533,7 @@ async fn recent_route(
         .map_err(|e| internal(e).into_response())
 }
 
+#[allow(clippy::result_large_err)] // axum's Response is the error a handler returns; boxing it buys nothing here
 async fn next_route(
     State(state): State<Arc<AppState>>,
     Extension(ParentOf(family_id)): Extension<ParentOf>,
