@@ -27,6 +27,7 @@ test('a budget form becomes the API body, blanks becoming no limit', () => {
 			video_equivalents: 3,
 			window_s: 86400,
 			minutes_cap: null,
+			ve_minutes: null,
 			cutoff_mid_play: true,
 			daily_windows: [['07:00', '19:00']]
 		}
@@ -43,4 +44,11 @@ test('request kinds have parent-facing labels', () => {
 test('loginHref returns to the given path', async () => {
 	const { loginHref } = await import('../src/lib/parent.js');
 	assert.equal(loginHref('/parent/children?x=1'), '/auth/login?next=%2Fparent%2Fchildren%3Fx%3D1');
+});
+
+test('the minutes per video equivalent ride the budget body; zero and junk are refused', () => {
+	const f = { videos: '3', veMinutes: '10', minutes: '', windows: '', cutoff: false };
+	assert.equal(budgetBody(f)?.ve_minutes, 10);
+	assert.equal(budgetBody({ ...f, veMinutes: '0' }), null);
+	assert.equal(budgetBody({ ...f, veMinutes: 'x' }), null);
 });

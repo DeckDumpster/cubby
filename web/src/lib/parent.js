@@ -32,21 +32,24 @@ export function fmtWatched(s) {
 }
 
 /**
- * @param {{videos: string, minutes: string, windows: string, cutoff: boolean}} form
- * @returns {{video_equivalents: number|null, window_s: number, minutes_cap: number|null,
+ * @param {{videos: string, minutes: string, windows: string, cutoff: boolean, veMinutes?: string}} form
+ * @returns {{video_equivalents: number|null, window_s: number, minutes_cap: number|null, ve_minutes: number|null,
  *   cutoff_mid_play: boolean, daily_windows: [string, string][]} | null} null when a field is junk
  */
 export function budgetBody(form) {
 	const num = (/** @type {string} */ v) => (v.trim() === '' ? null : Number(v));
 	const videos = num(form.videos);
 	const minutes = num(form.minutes);
+	const veMinutes = num(form.veMinutes ?? '');
 	const windows = windowsFromText(form.windows);
 	if (windows === null) return null;
+	if (veMinutes !== null && (!Number.isFinite(veMinutes) || veMinutes <= 0)) return null;
 	if ([videos, minutes].some((n) => n !== null && (!Number.isFinite(n) || n < 0))) return null;
 	return {
 		video_equivalents: videos,
 		window_s: 86400,
 		minutes_cap: minutes,
+		ve_minutes: veMinutes,
 		cutoff_mid_play: form.cutoff,
 		daily_windows: windows
 	};

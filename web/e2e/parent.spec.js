@@ -231,7 +231,7 @@ test('the progress card shows used and left against the limits and who is watchi
 	await page.goto('/parent');
 	const maya = page.getByRole('article', { name: 'Maya progress' });
 	await expect(maya).toContainText('Watching now: How volcanoes work');
-	await expect(maya).toContainText('1.5 left');
+	await expect(maya).toContainText('1.50 left');
 	await expect(maya).toContainText('45 left');
 	await expect(maya).toContainText('15 of 60 used');
 	const theo = page.getByRole('article', { name: 'Theo progress' });

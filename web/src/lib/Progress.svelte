@@ -38,6 +38,7 @@
 	});
 
 	const num = (n: number) => String(Math.round(n * 10) / 10);
+	const fmt = (label: string, n: number) => (label === 'Videos' ? n.toFixed(2) : num(n));
 	const pct = (s: Side) => (s.limit ? Math.min(100, (s.used / s.limit) * 100) : 0);
 	const at = (t: number, tz: string, day: boolean) =>
 		new Intl.DateTimeFormat(undefined, {
@@ -75,16 +76,16 @@
 							{#if s.limit === null}
 								<b>No limit</b>
 							{:else}
-								<b>{num(s.left ?? 0)} left</b>
+								<b>{fmt(label, s.left ?? 0)} left</b>
 							{/if}
 						</div>
 						{#if s.limit !== null}
 							<div class="bar" role="progressbar" aria-label="{label} used" aria-valuemin="0" aria-valuemax={s.limit} aria-valuenow={Math.min(s.used, s.limit)}>
 								<span class:full={s.reached} style="width: {pct(s)}%"></span>
 							</div>
-							<small>{num(s.used)} of {num(s.limit)} used{#if s.reached} · limit reached{/if}</small>
+							<small>{fmt(label, s.used)} of {fmt(label, s.limit)} used{#if s.reached} · limit reached{/if}</small>
 						{:else}
-							<small>{num(s.used)} used</small>
+							<small>{fmt(label, s.used)} used</small>
 						{/if}
 					</div>
 				{/each}
