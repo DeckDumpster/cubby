@@ -871,3 +871,46 @@ async fn an_empty_or_absurd_extra_grant_is_refused() {
         .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn a_child_request_reaches_the_parent_inbox_once() {
+    let e = env().await;
+    e.videos();
+    let (child, tok) = e.child_with_device().await;
+    e.parent(
+        "POST",
+        "/api/parent/policies",
+        Some(json!({"url": "https://youtu.be/v1", "child_id": child})),
+    )
+    .await;
+    let post = |tok: String, body: Value| {
+        let e = &e;
+        async move {
+            let r = Request::post("/api/child/request")
+                .header("authorization", format!("Bearer {tok}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            e.call(r).await
+        }
+    };
+    let (s, a) = post(tok.clone(), json!({"kind": "like", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::OK, "{a}");
+    let (s, b) = post(tok.clone(), json!({"kind": "like", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(a["id"], b["id"], "a duplicate open request is the same row");
+    let (_, inbox) = e.parent("GET", "/api/parent/requests", None).await;
+    assert_eq!(inbox.as_array().unwrap().len(), 1, "{inbox}");
+    assert_eq!(inbox[0]["kind"], "like");
+    assert_eq!(inbox[0]["youtube_id"], "v1");
+    assert_eq!(inbox[0]["child_name"], "Ada");
+
+    let (s, _) = post(tok.clone(), json!({"kind": "like", "youtube_id": "w1"})).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "a video the child may not watch");
+    let (s, _) = post(tok.clone(), json!({"kind": "nope", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = post("bad".into(), json!({"kind": "like", "youtube_id": "v1"})).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (_, inbox) = e.parent("GET", "/api/parent/requests", None).await;
+    assert_eq!(inbox.as_array().unwrap().len(), 1);
+}

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use cubby_core::rank::{ChildCtx, Ranker, V1Ranker, VideoMeta, rank_checked};
 use cubby_db::browse::{self, History, VideoRow};
@@ -299,6 +299,36 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/api/child/search", get(search_route))
         .route("/api/child/next", get(next_route))
         .route("/api/child/recent", get(recent_route))
+        .route("/api/child/request", post(request_route))
+}
+
+#[derive(Deserialize)]
+struct RequestBody {
+    kind: String,
+    youtube_id: String,
+}
+
+/// A child's "I like this" / "More from this channel": one open row for the parent's inbox.
+async fn request_route(
+    State(state): State<Arc<AppState>>,
+    Extension(ParentOf(family_id)): Extension<ParentOf>,
+    Extension(dev): Extension<Device>,
+    Json(b): Json<RequestBody>,
+) -> Result<Json<Value>, ApiError> {
+    if !matches!(b.kind.as_str(), "like" | "more-from-channel") {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "unknown request kind"));
+    }
+    let conn = open_own(&state, &family_id)?;
+    let id = cubby_db::parent::add_request(
+        &conn,
+        &dev.child_id,
+        &b.kind,
+        &b.youtube_id,
+        crate::play::unix_now(),
+    )
+    .map_err(internal)?
+    .ok_or_else(|| ApiError::new(StatusCode::FORBIDDEN, "that video is not available"))?;
+    Ok(Json(json!({"ok": true, "id": id})))
 }
 
 fn internal(e: impl std::fmt::Display) -> ApiError {

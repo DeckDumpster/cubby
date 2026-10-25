@@ -710,6 +710,46 @@ pub fn open_requests(conn: &Connection) -> Result<Vec<OpenRequest>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// A child's ask: `like` or `more-from-channel` about a video they may play. A second open
+/// request of the same kind for the same video from the same child returns the existing id.
+/// `None` means the video is not playable for that child.
+pub fn add_request(
+    conn: &Connection,
+    child_id: &str,
+    kind: &str,
+    youtube_id: &str,
+    now: i64,
+) -> Result<Option<String>> {
+    if !matches!(kind, "like" | "more-from-channel") {
+        return Err(DbError::Invalid(format!("unknown request kind {kind:?}")));
+    }
+    let playable: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM playable WHERE child_id=?1 AND youtube_id=?2)",
+        params![child_id, youtube_id],
+        |r| r.get(0),
+    )?;
+    if !playable {
+        return Ok(None);
+    }
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM requests WHERE child_id=?1 AND kind=?2 AND youtube_id=?3
+             AND resolved_at IS NULL",
+            params![child_id, kind, youtube_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(id) = existing {
+        return Ok(Some(id));
+    }
+    let id = ulid::Ulid::generate().to_string();
+    conn.execute(
+        "INSERT INTO requests(id,child_id,kind,youtube_id,created_at) VALUES (?1,?2,?3,?4,?5)",
+        params![id, child_id, kind, youtube_id, now],
+    )?;
+    Ok(Some(id))
+}
+
 /// Resolves an open request: `allow-channel` adds a channel policy for the requesting child,
 /// `allow-more` approves the `n` newest not-yet-allowed known videos of the video's channel for
 /// that child, `dismiss` just closes it. Returns the request's kind, or `None` if it is not open.

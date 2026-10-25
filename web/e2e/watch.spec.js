@@ -50,7 +50,7 @@ const FAKE_PLAYER = () => {
 	window.__state = (s) => window.__players.at(-1).opts.events.onStateChange({ data: s });
 };
 
-async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [] } = {}) {
+async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200 } = {}) {
 	const calls = [];
 	await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
 	await page.addInitScript(FAKE_PLAYER);
@@ -71,7 +71,7 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		if (path.endsWith('/end')) return json({ ok: true });
 		if (path.endsWith('/next')) return json(NEXT);
 		if (path.endsWith('/search')) return json({ tiles: [tile('v9', 'Found it')] });
-		if (path.endsWith('/request')) return json({ ok: true });
+		if (path.endsWith('/request')) return requestStatus === 200 ? json({ ok: true }) : route.fulfill({ status: requestStatus, json: {} });
 		return route.fulfill({ status: 404, json: {} });
 	});
 	return calls;
@@ -151,6 +151,16 @@ test('like and more-from-channel post requests', async ({ page }) => {
 		{ kind: 'like', youtube_id: 'v1' },
 		{ kind: 'more-from-channel', youtube_id: 'v1' }
 	]);
+});
+
+test('a failed request reverts the button and says so gently', async ({ page }) => {
+	await setup(page, { requestStatus: 500 });
+	await page.goto('/watch');
+	await page.getByRole('button', { name: /First video/ }).click();
+	await page.getByRole('button', { name: /I like this/ }).click();
+	await expect(page.getByText("Couldn't send — try again")).toBeVisible();
+	await expect(page.getByRole('button', { name: /I like this/ })).toBeEnabled();
+	await expect(page.getByText('Asked!')).toHaveCount(0);
 });
 
 test('search shows only what the search API returns', async ({ page }) => {

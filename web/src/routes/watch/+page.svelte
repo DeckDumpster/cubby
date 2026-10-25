@@ -66,6 +66,8 @@
 	let poll: ReturnType<typeof setInterval> | undefined;
 	let suggestions = $state<Tile[]>([]);
 	let sent = $state<Record<string, boolean>>({});
+	let asking = $state<Record<string, boolean>>({});
+	let askFailed = $state(false);
 	let host: HTMLDivElement | undefined = $state();
 	// Fullscreen is Cubby's own container, never the YouTube iframe. 'api' = element fullscreen,
 	// 'fill' = the CSS fixed-viewport fallback (iPhone Safari, WKWebView without element fullscreen).
@@ -470,8 +472,19 @@
 	async function ask(kind: 'like' | 'more-from-channel') {
 		if (!current) return;
 		const key = `${kind}:${current.youtube_id}`;
-		sent[key] = true;
-		await api('/api/child/request', { body: { kind, youtube_id: current.youtube_id } });
+		if (asking[key] || sent[key]) return;
+		asking[key] = true;
+		askFailed = false;
+		let ok = false;
+		try {
+			const r = await api('/api/child/request', { body: { kind, youtube_id: current.youtube_id } });
+			ok = r.status >= 200 && r.status < 300;
+		} catch {
+			ok = false;
+		}
+		asking[key] = false;
+		if (ok) sent[key] = true;
+		else askFailed = true;
 	}
 </script>
 
@@ -621,13 +634,14 @@
 						<button class="big" data-testid="fullscreen" aria-pressed={fsMode !== 'off'} aria-label={fsMode === 'off' ? 'Full screen' : 'Exit full screen'} onclick={toggleFullscreen}>{fsMode === 'off' ? '⛶' : '✕'}</button>
 					</div>
 					<div class="actions">
-						<button disabled={sent[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
+						<button disabled={sent[`like:${current.youtube_id}`] || asking[`like:${current.youtube_id}`]} onclick={() => ask('like')}>
 							{sent[`like:${current.youtube_id}`] ? 'Asked! 👍' : '👍 I like this'}
 						</button>
-						<button disabled={sent[`more-from-channel:${current.youtube_id}`]} onclick={() => ask('more-from-channel')}>
+						<button disabled={sent[`more-from-channel:${current.youtube_id}`] || asking[`more-from-channel:${current.youtube_id}`]} onclick={() => ask('more-from-channel')}>
 							{sent[`more-from-channel:${current.youtube_id}`] ? 'Asked!' : 'More from this channel'}
 						</button>
 					</div>
+					{#if askFailed}<p role="alert" class="ask-failed">Couldn't send — try again</p>{/if}
 				{/if}
 			</div>
 		{/if}
