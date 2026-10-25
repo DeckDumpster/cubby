@@ -102,42 +102,38 @@ export class ParentState {
 			await api('POST', '/api/parent/policies', { url: this.url, child_id: this.scope || null });
 		} catch (e) {
 			this.addError = e instanceof Error ? e.message : String(e);
-			return;
+			throw e;
 		} finally {
 			this.adding = false;
 		}
 		this.url = '';
 		await this.load();
 	};
-	act = (method: string, path: string, body?: unknown) =>
-		this.run(async () => {
-			await api(method, path, body);
-			await this.load();
-		});
-	saveBudget = (id: string) =>
-		this.run(async () => {
-			const body = budgetBody(this.forms[id]);
-			if (!body) throw new Error('Check the budget: numbers, and windows like 07:00-19:00');
-			await api('PUT', `/api/parent/children/${id}/budget`, body);
-			await this.load();
-		});
-	pair = (id: string) =>
-		this.run(async () => {
-			const r = await api('POST', `/api/parent/children/${id}/pairing`);
-			this.pairing = { child: id, code: r.code };
-		});
-	setAvatar = (c: Child, avatar: string) =>
-		this.run(async () => {
-			await api('PUT', `/api/parent/children/${c.id}`, { name: c.name, avatar, tz: c.tz });
-			await this.load();
-		});
-	addChild = () =>
-		this.run(async () => {
-			await api('POST', '/api/parent/children', this.newChild);
-			this.newChild.name = '';
-			this.newChild.avatar = '';
-			await this.load();
-		});
+	// The actions below throw on failure: ActionButton turns that into the error toast.
+	act = async (method: string, path: string, body?: unknown) => {
+		await api(method, path, body);
+		await this.load();
+	};
+	saveBudget = async (id: string) => {
+		const body = budgetBody(this.forms[id]);
+		if (!body) throw new Error('Check the budget: numbers, and windows like 07:00-19:00');
+		await api('PUT', `/api/parent/children/${id}/budget`, body);
+		await this.load();
+	};
+	pair = async (id: string) => {
+		const r = await api('POST', `/api/parent/children/${id}/pairing`);
+		this.pairing = { child: id, code: r.code };
+	};
+	setAvatar = async (c: Child, avatar: string) => {
+		await api('PUT', `/api/parent/children/${c.id}`, { name: c.name, avatar, tz: c.tz });
+		await this.load();
+	};
+	addChild = async () => {
+		await api('POST', '/api/parent/children', this.newChild);
+		this.newChild.name = '';
+		this.newChild.avatar = '';
+		await this.load();
+	};
 }
 
 const KEY = Symbol('parent');

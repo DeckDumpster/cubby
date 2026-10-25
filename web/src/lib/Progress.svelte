@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/parent.js';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import { getParent } from '$lib/parentState.svelte.js';
 
 	type Side = { limit: number | null; used: number; left: number | null; reached: boolean };
@@ -40,18 +41,16 @@
 
 	let custom: Record<string, { minutes: string; videos: string }> = $state({});
 	let openLive: Record<string, boolean> = $state({});
-	let failed = $state('');
 	const grant = async (id: string, minutes: number, videos: number) => {
-		failed = '';
-		if (!(minutes > 0 || videos > 0)) return;
-		try {
-			await api('POST', `/api/parent/children/${id}/extra`, { minutes, videos });
-			if (custom[id]) custom[id] = { minutes: '', videos: '' };
-			await load();
-		} catch {
-			failed = 'Could not add the extra time. Try again.';
-		}
+		const c = kid(id);
+		if (!(minutes > 0 || videos > 0)) throw new Error('enter minutes or videos first');
+		await api('POST', `/api/parent/children/${id}/extra`, { minutes, videos });
+		if (custom[id]) custom[id] = { minutes: '', videos: '' };
+		await load();
+		return extraText((c?.name ?? 'child'), minutes, videos);
 	};
+	const extraText = (name: string, minutes: number, videos: number) =>
+		`Added ${[minutes ? `${num(minutes)} min` : '', videos ? `${num(videos)} video${videos === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')} for ${name}`;
 
 	const num = (n: number) => String(Math.round(n * 10) / 10);
 	const fmt = (label: string, n: number) => (label === 'Videos' ? n.toFixed(2) : num(n));
@@ -111,15 +110,14 @@
 					</div>
 				{/each}
 				<div class="extra" role="group" aria-label="Give {c?.name ?? 'child'} extra for today">
-					<button type="button" onclick={() => grant(r.child_id, 15, 0)}>+15 min</button>
-					<button type="button" onclick={() => grant(r.child_id, 0, 1)}>+1 video</button>
+					<ActionButton run={() => grant(r.child_id, 15, 0)} fail="add the extra time">+15 min</ActionButton>
+					<ActionButton run={() => grant(r.child_id, 0, 1)} fail="add the extra time">+1 video</ActionButton>
 				</div>
-				<form class="extra" onsubmit={(ev) => { ev.preventDefault(); const f = custom[r.child_id]; grant(r.child_id, Number(f?.minutes) || 0, Number(f?.videos) || 0); }}>
+				<form class="extra" onsubmit={(ev) => ev.preventDefault()}>
 					<input type="number" min="0" step="1" inputmode="numeric" placeholder="min" aria-label="Extra minutes" value={custom[r.child_id]?.minutes ?? ''} oninput={(ev) => (custom[r.child_id] = { ...custom[r.child_id], videos: custom[r.child_id]?.videos ?? '', minutes: ev.currentTarget.value })} />
 					<input type="number" min="0" step="0.5" inputmode="decimal" placeholder="videos" aria-label="Extra videos" value={custom[r.child_id]?.videos ?? ''} oninput={(ev) => (custom[r.child_id] = { ...custom[r.child_id], minutes: custom[r.child_id]?.minutes ?? '', videos: ev.currentTarget.value })} />
-					<button type="submit">Add</button>
+					<ActionButton type="submit" run={() => grant(r.child_id, Number(custom[r.child_id]?.minutes) || 0, Number(custom[r.child_id]?.videos) || 0)} fail="add the extra time">Add</ActionButton>
 				</form>
-				{#if failed}<p class="state" role="alert">{failed}</p>{/if}
 				{#if r.grants?.length}
 					<ul class="grants" aria-label="Extra given today">
 						{#each r.grants as g (g.id)}
@@ -152,8 +150,8 @@
 	.track span { display: block; height: 100%; background: var(--accent); }
 	.track span.full { background: var(--danger); }
 	.extra { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
-	.extra button, .extra input { min-height: 2.75rem; font: inherit; }
-	.extra button { flex: 1 1 6rem; }
+	.extra :global(button), .extra input { min-height: 2.75rem; font: inherit; }
+	.extra :global(button) { flex: 1 1 6rem; }
 	.extra input { flex: 1 1 4rem; min-width: 0; width: 4rem; }
 	.grants { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
 	small { color: var(--muted); }
