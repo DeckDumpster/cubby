@@ -363,3 +363,28 @@ test('autoplay refused clears the ready frame and leaves the Play control', asyn
 	await expect(page.getByTestId('ready-frame')).toHaveCount(0);
 	await expect(page.getByTestId('playpause')).toHaveAccessibleName('Play');
 });
+
+test('a shield covers the iframe exactly, takes every tap and toggles playback; the iframe gets no pointer events', async ({ page }) => {
+	await page.setViewportSize({ width: 1024, height: 768 });
+	await startPlaying(page);
+	const same = async () => {
+		const f = await page.locator('iframe[title="fake player"]').boundingBox();
+		const s = await page.getByTestId('shield').boundingBox();
+		expect(s).toEqual(f);
+		expect(await page.evaluate(() => {
+			const r = document.querySelector('iframe').getBoundingClientRect();
+			return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2).getAttribute('data-testid');
+		})).toBe('shield');
+		expect(await page.evaluate(() => getComputedStyle(document.querySelector('iframe')).pointerEvents)).toBe('none');
+	};
+	await same();
+	await page.getByTestId('shield').click();
+	expect(await page.evaluate(() => window.__players[0].paused)).toBe(true);
+	await page.evaluate(() => window.__state(2));
+	await page.getByTestId('resume').click();
+	await page.evaluate(() => window.__state(1));
+	await page.getByTestId('fullscreen').click();
+	await same();
+	await page.getByTestId('shield').click();
+	expect(await page.evaluate(() => window.__players[0].paused)).toBe(true);
+});
