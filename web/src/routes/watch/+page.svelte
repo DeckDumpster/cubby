@@ -547,8 +547,8 @@
 					<h1 class="now">{current.title}</h1>
 					<div class="stage">
 						<div class="player" class:hidden={paused} class:unsettled={!settled && !blocked} data-settled={settled} bind:this={host}></div>
+						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 						<div class="shield" data-testid="shield" aria-hidden="true" onclick={toggle}></div>
-						{#if !settled && !paused}
 						{#if !settled && !paused && !blocked}
 							<div class="ready" data-testid="ready-frame"><h2 class="break">Getting your video ready…</h2></div>
 						{/if}
