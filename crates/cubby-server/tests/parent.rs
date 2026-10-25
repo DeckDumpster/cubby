@@ -300,7 +300,10 @@ async fn the_library_videos_carry_their_duration_or_null() {
         .execute("UPDATE videos SET duration_s=423 WHERE youtube_id='v1'", [])
         .unwrap();
     e.family()
-        .execute("UPDATE videos SET duration_s=NULL WHERE youtube_id='v2'", [])
+        .execute(
+            "UPDATE videos SET duration_s=NULL WHERE youtube_id='v2'",
+            [],
+        )
         .unwrap();
     e.parent(
         "POST",
