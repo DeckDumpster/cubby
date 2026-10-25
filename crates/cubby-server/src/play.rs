@@ -67,7 +67,7 @@ fn child_tz(conn: &Connection, child: &str) -> rusqlite::Result<String> {
 fn load_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
     let row = conn
         .query_row(
-            "SELECT video_equivalents, window_s, minutes_cap, cutoff_mid_play, daily_windows
+            "SELECT video_equivalents, window_s, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes
              FROM budgets WHERE child_id=?1",
             [child],
             |r| {
@@ -77,15 +77,17 @@ fn load_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
                     r.get::<_, Option<f64>>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<f64>>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((ve, window_s, minutes_cap, cutoff, windows)) = row else {
+    let Some((ve, window_s, minutes_cap, cutoff, windows, ve_minutes)) = row else {
         return Ok(Budget {
             video_equivalents: None,
             window_s: 86_400,
             minutes_cap: None,
+            ve_minutes: budget::DEFAULT_VE_MINUTES,
             cutoff_mid_play: false,
             daily_windows: vec![],
         });
@@ -102,6 +104,9 @@ fn load_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
         video_equivalents: ve,
         window_s: window_s.filter(|w| *w > 0).unwrap_or(86_400),
         minutes_cap,
+        ve_minutes: ve_minutes
+            .filter(|m| m.is_finite() && *m > 0.0)
+            .unwrap_or(budget::DEFAULT_VE_MINUTES),
         cutoff_mid_play: cutoff != 0,
         daily_windows,
     })
@@ -173,9 +178,9 @@ pub fn play(
     )?;
     let grant_id = ulid::Ulid::generate().to_string();
     conn.execute(
-        "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,max_position_s,watched_s,charge)
-         VALUES (?1,?2,?3,?4,?5,?5,0,0,0)",
-        params![grant_id, dev.child_id, dev.id, youtube_id, now],
+        "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,max_position_s,watched_s,charge,ve_s)
+         VALUES (?1,?2,?3,?4,?5,?5,0,0,0,?6)",
+        params![grant_id, dev.child_id, dev.id, youtube_id, now, b.ve_minutes * 60.0],
     )?;
     Ok(PlayOutcome::Granted {
         grant_id,
@@ -188,12 +193,15 @@ struct Grant {
     progress: Progress,
     charge: f64,
     ended: bool,
+    /// Seconds per video equivalent the grant was stamped with; `None` for a grant that
+    /// predates time-based charging.
+    ve_s: Option<f64>,
 }
 
 fn load_grant(conn: &Connection, dev: &Device, id: &str) -> Result<Grant, PlayError> {
     conn.query_row(
         "SELECT youtube_id, COALESCE(last_beat_at,granted_at), COALESCE(max_position_s,0),
-                COALESCE(watched_s,0), COALESCE(charge,0), ended_at IS NOT NULL
+                COALESCE(watched_s,0), COALESCE(charge,0), ended_at IS NOT NULL, ve_s
          FROM play_grants WHERE id=?1 AND child_id=?2",
         params![id, dev.child_id],
         |r| {
@@ -206,6 +214,7 @@ fn load_grant(conn: &Connection, dev: &Device, id: &str) -> Result<Grant, PlayEr
                 },
                 charge: r.get(4)?,
                 ended: r.get(5)?,
+                ve_s: r.get(6)?,
             })
         },
     )
@@ -239,7 +248,7 @@ pub fn beat(
         .optional()?
         .unwrap_or(0.0);
     let p = budget::apply_beat(g.progress, now, position_s);
-    let new_charge = budget::charge(p.watched_s, duration);
+    let new_charge = budget::charge(p.watched_s, duration, g.ve_s);
     conn.execute(
         "UPDATE play_grants SET last_beat_at=?2, max_position_s=?3, watched_s=?4, charge=?5 WHERE id=?1",
         params![grant_id, now, p.position_s, p.watched_s, new_charge],
@@ -350,6 +359,7 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
     Ok(json!({
         "child_id": child, "tz": tz,
         "videos": side(b.video_equivalents, u.charge, r.videos),
+        "ve_minutes": b.ve_minutes,
         "minutes": side(b.minutes_cap, u.watched_s / 60.0, r.minutes),
         "resets_at": oldest.map(|t| t + b.window_s),
         "window": {"restricted": !b.daily_windows.is_empty(), "open": next_open.is_none(),
@@ -489,10 +499,11 @@ mod tests {
         }
     }
 
+    /// A budget whose video equivalent is 10 minutes, so a fully watched 600 s video costs 1.
     fn budget_row(c: &Connection, ve: f64, cutoff: i64, windows: &str) {
         c.execute(
-            "INSERT OR REPLACE INTO budgets(child_id,video_equivalents,window_s,minutes_cap,cutoff_mid_play,daily_windows)
-             VALUES ('kid',?1,86400,NULL,?2,?3)",
+            "INSERT OR REPLACE INTO budgets(child_id,video_equivalents,window_s,minutes_cap,cutoff_mid_play,daily_windows,ve_minutes)
+             VALUES ('kid',?1,86400,NULL,?2,?3,10)",
             params![ve, cutoff, windows],
         )
         .unwrap();
@@ -522,10 +533,71 @@ mod tests {
     #[test]
     fn quitting_at_95_percent_charges_0_95() {
         let c = db();
+        budget_row(&c, 5.0, 0, "");
         let id = grant(&c, "v1", T0);
         watch(&c, &id, T0, 570);
         end(&c, &dev(), &id, "left", T0 + 571).unwrap();
         assert_eq!(charge_of(&c, &id), 0.95);
+    }
+
+    fn long_video(c: &Connection) {
+        c.execute_batch(
+            "INSERT INTO videos(youtube_id,title,duration_s) VALUES ('long','l',7200);
+             INSERT INTO allowed_videos(youtube_id,child_id,policy_id,state,changed_at) VALUES ('long',NULL,'p','approved',0);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_120_minute_video_watched_through_charges_8_at_the_default_unit() {
+        let c = db();
+        long_video(&c);
+        let id = grant(&c, "long", T0);
+        watch(&c, &id, T0, 7200);
+        assert!((charge_of(&c, &id) - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_35_minute_watch_at_the_default_unit_charges_2_33() {
+        let c = db();
+        long_video(&c);
+        let id = grant(&c, "long", T0);
+        watch(&c, &id, T0, 2100);
+        assert!((charge_of(&c, &id) - 2.0 - 1.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_20_second_watch_of_a_long_video_charges_nothing() {
+        let c = db();
+        long_video(&c);
+        let id = grant(&c, "long", T0);
+        watch(&c, &id, T0, 20);
+        assert_eq!(charge_of(&c, &id), 0.0);
+    }
+
+    #[test]
+    fn changing_the_unit_changes_the_next_charge_and_not_the_one_in_flight() {
+        let c = db();
+        long_video(&c);
+        budget_row(&c, 50.0, 0, "");
+        let first = grant(&c, "long", T0);
+        c.execute("UPDATE budgets SET ve_minutes=5", []).unwrap();
+        watch(&c, &first, T0, 600);
+        assert!((charge_of(&c, &first) - 1.0).abs() < 1e-9);
+        end(&c, &dev(), &first, "left", T0 + 601).unwrap();
+        let next = grant(&c, "long", T0 + 700);
+        watch(&c, &next, T0 + 700, 600);
+        assert!((charge_of(&c, &next) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_grant_begun_before_the_change_is_not_rebilled() {
+        let c = db();
+        long_video(&c);
+        let id = grant(&c, "long", T0);
+        c.execute("UPDATE play_grants SET ve_s=NULL", []).unwrap();
+        watch(&c, &id, T0, 3600);
+        assert_eq!(charge_of(&c, &id), 0.5);
     }
 
     #[test]

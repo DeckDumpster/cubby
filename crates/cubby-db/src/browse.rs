@@ -226,8 +226,8 @@ mod tests {
         add_video(&c, "half", "t", "c1", "[]", 0);
         add_video(&c, "done", "t", "c2", "[]", 0);
         c.execute_batch(
-            "INSERT INTO play_grants VALUES('g1','kid','d','half',1,1,100,100,0.3,NULL,NULL);
-             INSERT INTO play_grants VALUES('g2','kid','d','done',2,2,295,295,1,NULL,NULL);
+            "INSERT INTO play_grants VALUES('g1','kid','d','half',1,1,100,100,0.3,NULL,NULL,NULL);
+             INSERT INTO play_grants VALUES('g2','kid','d','done',2,2,295,295,1,NULL,NULL,NULL);
              INSERT INTO requests VALUES('r','kid','like','done',1,NULL,NULL);",
         )
         .unwrap();

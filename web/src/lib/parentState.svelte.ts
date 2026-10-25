@@ -13,6 +13,7 @@ export type Child = {
 	budget: {
 		video_equivalents: number | null;
 		minutes_cap: number | null;
+		ve_minutes: number;
 		cutoff_mid_play: boolean;
 		daily_windows: [string, string][];
 	};
@@ -38,7 +39,7 @@ export class ParentState {
 	scope = $state('');
 	pairing: { child: string; code: string } | null = $state(null);
 	newChild = $state({ name: '', avatar: '', tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
-	forms: Record<string, { videos: string; minutes: string; windows: string; cutoff: boolean }> = $state({});
+	forms: Record<string, { videos: string; veMinutes: string; minutes: string; windows: string; cutoff: boolean }> = $state({});
 
 	historyChild = $derived(this.historyChildParam || this.children[0]?.id || '');
 
@@ -57,6 +58,7 @@ export class ParentState {
 			for (const c of this.children)
 				this.forms[c.id] = {
 					videos: c.budget.video_equivalents?.toString() ?? '',
+					veMinutes: c.budget.ve_minutes?.toString() ?? '15',
 					minutes: c.budget.minutes_cap?.toString() ?? '',
 					windows: windowsToText(c.budget.daily_windows),
 					cutoff: c.budget.cutoff_mid_play

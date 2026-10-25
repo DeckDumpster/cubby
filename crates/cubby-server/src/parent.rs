@@ -8,7 +8,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
-use cubby_core::budget::{parse_windows, valid_tz};
+use cubby_core::budget::{DEFAULT_VE_MINUTES, parse_windows, valid_tz};
 use cubby_core::policy_url::{ChannelLookup, resolve_url};
 use cubby_db::DbError;
 use cubby_db::parent::{self as store, Budget};
@@ -110,7 +110,8 @@ async fn children(
         out.push(json!({
             "id": k.id, "name": k.name, "avatar": k.avatar, "tz": k.tz,
             "budget": {"video_equivalents": b.video_equivalents, "window_s": b.window_s,
-                "minutes_cap": b.minutes_cap, "cutoff_mid_play": b.cutoff_mid_play,
+                "minutes_cap": b.minutes_cap,
+                "ve_minutes": b.ve_minutes.unwrap_or(DEFAULT_VE_MINUTES), "cutoff_mid_play": b.cutoff_mid_play,
                 "daily_windows": windows},
             "devices": devs,
         }));
@@ -161,6 +162,8 @@ struct BudgetBody {
     window_s: Option<i64>,
     minutes_cap: Option<i64>,
     #[serde(default)]
+    ve_minutes: Option<f64>,
+    #[serde(default)]
     cutoff_mid_play: bool,
     #[serde(default)]
     daily_windows: Vec<(String, String)>,
@@ -176,6 +179,7 @@ async fn set_budget(
         .is_some_and(|v| !v.is_finite() || v < 0.0)
         || b.minutes_cap.is_some_and(|m| m < 0)
         || b.window_s.is_some_and(|w| w <= 0)
+        || b.ve_minutes.is_some_and(|m| !m.is_finite() || m <= 0.0)
     {
         return Err(bad("budget numbers must be positive"));
     }
@@ -199,6 +203,7 @@ async fn set_budget(
             video_equivalents: b.video_equivalents,
             window_s: b.window_s,
             minutes_cap: b.minutes_cap,
+            ve_minutes: b.ve_minutes,
             cutoff_mid_play: b.cutoff_mid_play,
             daily_windows: windows,
         },

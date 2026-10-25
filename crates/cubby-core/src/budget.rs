@@ -17,12 +17,17 @@ pub const BEAT_TIMEOUT_S: i64 = 60;
 /// Grace given to the page to stop after a mid-play cutoff, unless the window closed.
 pub const CUTOFF_GRACE_S: u32 = 60;
 
+/// Minutes of watch time that make one video equivalent, unless the parent says otherwise.
+pub const DEFAULT_VE_MINUTES: f64 = 15.0;
+
 /// The budget row. `None` limits are unlimited; an empty `daily_windows` means any time of day.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Budget {
     pub video_equivalents: Option<f64>,
     pub window_s: i64,
     pub minutes_cap: Option<f64>,
+    /// Minutes of watching that cost one video equivalent.
+    pub ve_minutes: f64,
     pub cutoff_mid_play: bool,
     /// `(start, end)` in minutes after local midnight, `start < end`.
     pub daily_windows: Vec<(u32, u32)>,
@@ -79,12 +84,24 @@ pub fn apply_beat(p: Progress, now: i64, position_s: f64) -> Progress {
     }
 }
 
-/// What a grant costs: nothing under `min(30 s, 10%)` of the video, else the fraction watched.
-pub fn charge(watched_s: f64, duration_s: f64) -> f64 {
-    if duration_s <= 0.0 || watched_s < 30.0_f64.min(0.1 * duration_s) {
+/// What a grant costs. Nothing under `min(30 s, 10%)` of the video; otherwise the time actually
+/// watched over `unit_s`, the seconds of one video equivalent, uncapped. A grant begun before
+/// video equivalents were time-based has no unit (`None`) and keeps the fraction of the video
+/// watched, capped at 1.
+pub fn charge(watched_s: f64, duration_s: f64, unit_s: Option<f64>) -> f64 {
+    let sliver = if duration_s > 0.0 {
+        30.0_f64.min(0.1 * duration_s)
+    } else {
+        30.0
+    };
+    if watched_s < sliver {
         return 0.0;
     }
-    (watched_s / duration_s).min(1.0)
+    match unit_s {
+        Some(u) if u > 0.0 => watched_s / u,
+        _ if duration_s > 0.0 => (watched_s / duration_s).min(1.0),
+        _ => 0.0,
+    }
 }
 
 pub fn remaining(b: &Budget, u: Usage) -> Remaining {
@@ -222,6 +239,7 @@ mod tests {
             video_equivalents: Some(3.0),
             window_s: 86_400,
             minutes_cap: Some(60.0),
+            ve_minutes: DEFAULT_VE_MINUTES,
             cutoff_mid_play: false,
             daily_windows: vec![],
         }
@@ -275,25 +293,55 @@ mod tests {
     #[test]
     fn a_scrub_then_quit_at_95_percent_is_not_charged_95_percent() {
         let p = apply_beat(start(1000), 1005, 570.0);
-        assert_eq!(charge(p.watched_s, 600.0), 0.0);
+        assert_eq!(charge(p.watched_s, 600.0, None), 0.0);
     }
 
     #[test]
     fn a_play_under_ten_percent_or_thirty_seconds_is_free() {
-        assert_eq!(charge(29.0, 600.0), 0.0);
-        assert_eq!(charge(9.0, 100.0), 0.0);
-        assert_eq!(charge(10.0, 100.0), 0.1);
-        assert_eq!(charge(30.0, 600.0), 0.05);
+        assert_eq!(charge(29.0, 600.0, None), 0.0);
+        assert_eq!(charge(9.0, 100.0, None), 0.0);
+        assert_eq!(charge(10.0, 100.0, None), 0.1);
+        assert_eq!(charge(30.0, 600.0, None), 0.05);
     }
 
     #[test]
     fn watching_95_percent_charges_0_95() {
-        assert_eq!(charge(570.0, 600.0), 0.95);
+        assert_eq!(charge(570.0, 600.0, None), 0.95);
     }
 
     #[test]
-    fn a_charge_never_exceeds_one() {
-        assert_eq!(charge(900.0, 600.0), 1.0);
+    fn a_grant_with_no_unit_never_charges_over_one() {
+        assert_eq!(charge(900.0, 600.0, None), 1.0);
+    }
+
+    const UNIT: Option<f64> = Some(15.0 * 60.0);
+
+    #[test]
+    fn a_35_minute_watch_at_a_15_minute_unit_charges_2_33() {
+        let c = charge(35.0 * 60.0, 35.0 * 60.0, UNIT);
+        assert!((c - 2.0 - 1.0 / 3.0).abs() < 1e-9, "{c}");
+    }
+
+    #[test]
+    fn a_120_minute_video_watched_through_charges_8() {
+        assert_eq!(charge(120.0 * 60.0, 120.0 * 60.0, UNIT), 8.0);
+    }
+
+    #[test]
+    fn a_long_video_abandoned_at_10_minutes_charges_two_thirds() {
+        let c = charge(600.0, 120.0 * 60.0, UNIT);
+        assert!((c - 2.0 / 3.0).abs() < 1e-9, "{c}");
+    }
+
+    #[test]
+    fn a_20_second_watch_charges_nothing() {
+        assert_eq!(charge(20.0, 35.0 * 60.0, UNIT), 0.0);
+    }
+
+    #[test]
+    fn changing_the_unit_changes_the_next_charge() {
+        assert_eq!(charge(1800.0, 3600.0, Some(10.0 * 60.0)), 3.0);
+        assert_eq!(charge(1800.0, 3600.0, Some(15.0 * 60.0)), 2.0);
     }
 
     #[test]
@@ -460,9 +508,15 @@ mod tests {
         }
 
         #[test]
-        fn the_charge_is_between_zero_and_one(w in 0.0f64..1e5, d in 1.0f64..1e5) {
-            let c = charge(w, d);
+        fn a_grant_with_no_unit_charges_between_zero_and_one(w in 0.0f64..1e5, d in 1.0f64..1e5) {
+            let c = charge(w, d, None);
             prop_assert!((0.0..=1.0).contains(&c));
+        }
+
+        #[test]
+        fn a_charge_is_time_watched_over_the_unit(w in 0.0f64..1e5, d in 1.0f64..1e5, u in 60.0f64..3600.0) {
+            let c = charge(w, d, Some(u));
+            prop_assert!(c == 0.0 || (c - w / u).abs() < 1e-9);
         }
     }
 }

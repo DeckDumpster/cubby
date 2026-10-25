@@ -16,7 +16,9 @@
 				{/each}
 			</div>
 			{#if ps.forms[c.id]}
-				<label>Videos per day <input bind:value={ps.forms[c.id].videos} /></label>
+				<label>Video equivalents per day <input bind:value={ps.forms[c.id].videos} /></label>
+				<label>Minutes per video equivalent <input bind:value={ps.forms[c.id].veMinutes} /></label>
+				<small>A video equivalent is this many minutes of watching, so a long video costs more than a short one. Only time actually watched counts: a 120-minute video left after 10 minutes costs 10 minutes' worth.</small>
 				<label>Minutes per day <input bind:value={ps.forms[c.id].minutes} /></label>
 				<label>Windows <input placeholder="07:00-19:00" bind:value={ps.forms[c.id].windows} /></label>
 				<label class="check"><input type="checkbox" bind:checked={ps.forms[c.id].cutoff} /> Stop a video mid-play when the budget runs out</label>
