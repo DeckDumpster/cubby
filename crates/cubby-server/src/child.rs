@@ -308,7 +308,8 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 
 /// Browsing is refused once the grace is over; the body carries the limit so the page can say so.
 fn guard_locked(conn: &Connection, child: &str, now: i64) -> Result<Value, Response> {
-    let limit = crate::play::limit_json(conn, child, now).map_err(|e| internal(e).into_response())?;
+    let limit =
+        crate::play::limit_json(conn, child, now).map_err(|e| internal(e).into_response())?;
     if limit["state"] == "locked" {
         return Err((
             StatusCode::FORBIDDEN,

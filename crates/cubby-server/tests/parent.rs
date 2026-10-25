@@ -908,11 +908,18 @@ async fn once_the_grace_is_over_the_child_api_refuses_browsing_until_a_grant() {
     assert_eq!(home["limit"]["state"], "grace");
     assert!(home["limit"]["grace_left_s"].as_i64().unwrap() > 100);
     assert_eq!(e.child_play(&tok, "v1").await["refused"], "out-of-videos");
-    assert_eq!(e.child_get(&tok, "/api/child/search?q=one").await.0, StatusCode::OK);
+    assert_eq!(
+        e.child_get(&tok, "/api/child/search?q=one").await.0,
+        StatusCode::OK
+    );
 
     // The grace is a family setting.
     let (s, _) = e
-        .parent("PUT", "/api/parent/settings", Some(json!({"grace_minutes": 5})))
+        .parent(
+            "PUT",
+            "/api/parent/settings",
+            Some(json!({"grace_minutes": 5})),
+        )
         .await;
     assert_eq!(s, StatusCode::OK);
     let (_, st) = e.parent("GET", "/api/parent/settings", None).await;
@@ -920,7 +927,11 @@ async fn once_the_grace_is_over_the_child_api_refuses_browsing_until_a_grant() {
     let (_, home) = e.child_get(&tok, "/api/child/home").await;
     assert!(home["limit"]["grace_left_s"].as_i64().unwrap() > 200);
     let (s, _) = e
-        .parent("PUT", "/api/parent/settings", Some(json!({"grace_minutes": 99})))
+        .parent(
+            "PUT",
+            "/api/parent/settings",
+            Some(json!({"grace_minutes": 99})),
+        )
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 

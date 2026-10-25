@@ -668,10 +668,16 @@ mod tests {
         );
         assert!(matches!(
             play(&c, &dev(), "v2", at + 100).unwrap(),
-            PlayOutcome::Refused { reason: "out-of-videos", .. }
+            PlayOutcome::Refused {
+                reason: "out-of-videos",
+                ..
+            }
         ));
         assert_eq!(access_for(&c, "kid", at + 120).unwrap(), Access::Locked);
-        assert_eq!(access_for(&c, "kid", at + 3 * 3600).unwrap(), Access::Locked);
+        assert_eq!(
+            access_for(&c, "kid", at + 3 * 3600).unwrap(),
+            Access::Locked
+        );
     }
 
     #[test]
@@ -700,7 +706,9 @@ mod tests {
         let again = at + 1110;
         assert_eq!(
             access_for(&c, "kid", again).unwrap(),
-            Access::Grace { ends_at: again + 120 }
+            Access::Grace {
+                ends_at: again + 120
+            }
         );
     }
 
@@ -708,7 +716,10 @@ mod tests {
     fn a_grant_given_before_anyone_looked_still_beats_the_old_lock() {
         let c = spent_at_t0_plus_600();
         let at = T0 + 600;
-        assert_eq!(access_for(&c, "kid", at).unwrap(), Access::Grace { ends_at: at + 120 });
+        assert_eq!(
+            access_for(&c, "kid", at).unwrap(),
+            Access::Grace { ends_at: at + 120 }
+        );
         grant_extra(&c, "kid", 1.0, 0.0, "parent", None, at + 10).unwrap();
         let id = grant(&c, "v2", at + 20);
         watch(&c, &id, at + 20, 600);
@@ -716,7 +727,9 @@ mod tests {
         let later = at + 620;
         assert_eq!(
             access_for(&c, "kid", later).unwrap(),
-            Access::Grace { ends_at: later + 120 }
+            Access::Grace {
+                ends_at: later + 120
+            }
         );
     }
 
@@ -737,7 +750,9 @@ mod tests {
         let closed = T0 + 5 * 60;
         assert_eq!(
             access_for(&c, "kid", closed + 60).unwrap(),
-            Access::Grace { ends_at: closed + 120 }
+            Access::Grace {
+                ends_at: closed + 120
+            }
         );
         assert_eq!(access_for(&c, "kid", closed + 121).unwrap(), Access::Locked);
     }

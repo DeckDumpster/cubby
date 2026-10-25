@@ -179,7 +179,9 @@ pub fn limit_reached_at(b: &Budget, u: Usage, tz: &str, now: i64) -> Option<i64>
 pub fn access(reached_at: Option<i64>, grace_s: i64, now: i64) -> Access {
     match reached_at {
         None => Access::Open,
-        Some(t) if now < t + grace_s => Access::Grace { ends_at: t + grace_s },
+        Some(t) if now < t + grace_s => Access::Grace {
+            ends_at: t + grace_s,
+        },
         Some(_) => Access::Locked,
     }
 }
@@ -341,15 +343,30 @@ mod tests {
 
     #[test]
     fn the_limit_is_reached_when_a_budget_is_spent_or_the_window_closes() {
-        let spent = Usage { charge: 3.0, watched_s: 0.0 };
-        assert_eq!(limit_reached_at(&budget(), Usage::default(), "UTC", NOON_UTC), None);
-        assert_eq!(limit_reached_at(&budget(), spent, "UTC", NOON_UTC), Some(NOON_UTC));
-        let b = Budget { daily_windows: vec![(7 * 60, 11 * 60)], ..budget() };
+        let spent = Usage {
+            charge: 3.0,
+            watched_s: 0.0,
+        };
+        assert_eq!(
+            limit_reached_at(&budget(), Usage::default(), "UTC", NOON_UTC),
+            None
+        );
+        assert_eq!(
+            limit_reached_at(&budget(), spent, "UTC", NOON_UTC),
+            Some(NOON_UTC)
+        );
+        let b = Budget {
+            daily_windows: vec![(7 * 60, 11 * 60)],
+            ..budget()
+        };
         assert_eq!(
             limit_reached_at(&b, Usage::default(), "UTC", NOON_UTC),
             Some(NOON_UTC - 3600)
         );
-        let early = Budget { daily_windows: vec![(13 * 60, 19 * 60)], ..budget() };
+        let early = Budget {
+            daily_windows: vec![(13 * 60, 19 * 60)],
+            ..budget()
+        };
         assert_eq!(
             limit_reached_at(&early, Usage::default(), "UTC", NOON_UTC),
             Some(day_start("UTC", NOON_UTC))
