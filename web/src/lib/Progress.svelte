@@ -95,7 +95,7 @@
 							{/if}
 						</div>
 						{#if s.limit !== null}
-							<div class="bar" role="progressbar" aria-label="{label} used" aria-valuemin="0" aria-valuemax={s.limit} aria-valuenow={Math.min(s.used, s.limit)}>
+							<div class="track" role="progressbar" aria-label="{label} used" aria-valuemin="0" aria-valuemax={s.limit} aria-valuenow={Math.min(s.used, s.limit)}>
 								<span class:full={s.reached} style="width: {pct(s)}%"></span>
 							</div>
 							<small>{fmt(label, s.used)} of {fmt(label, s.limit)} used{#if s.reached} · limit reached{/if}</small>
@@ -144,9 +144,9 @@
 	.muted { color: var(--muted); font-size: 0.9rem; }
 	.meter { margin-top: var(--space-2); }
 	.mhead { display: flex; justify-content: space-between; gap: var(--space-2); }
-	.bar { height: 0.7rem; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: var(--space-1) 0; }
-	.bar span { display: block; height: 100%; background: var(--accent); }
-	.bar span.full { background: var(--danger); }
+	.track { height: 0.7rem; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: var(--space-1) 0; }
+	.track span { display: block; height: 100%; background: var(--accent); }
+	.track span.full { background: var(--danger); }
 	.extra { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
 	.extra button, .extra input { min-height: 2.75rem; font: inherit; }
 	.extra button { flex: 1 1 6rem; }

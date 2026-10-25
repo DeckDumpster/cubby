@@ -243,6 +243,40 @@ test('the progress card shows used and left against the limits and who is watchi
 	if (shots) await page.screenshot({ path: `${shots}/progress-390.png`, fullPage: true });
 });
 
+for (const scheme of ['light', 'dark'])
+	test(`progress bars fill to the share used (${scheme} 390px)`, async ({ page }) => {
+		await page.emulateMedia({ colorScheme: scheme });
+		await page.setViewportSize({ width: 390, height: 844 });
+		const rows = [
+			{ ...PROGRESS[0], child_id: 'c1', videos: { limit: 4, used: 1, left: 3, reached: false }, minutes: { limit: 25, used: 14.5, left: 10.5, reached: false } },
+			{ ...PROGRESS[0], child_id: 'c2', watching: null, videos: { limit: 4, used: 0, left: 4, reached: false }, minutes: { limit: 25, used: 25, left: 0, reached: true } }
+		];
+		await page.route('**/api/parent/**', (route) => {
+			const u = route.request().url();
+			return route.fulfill({ json: u.includes('/progress') ? rows : u.includes('/children') ? CHILDREN : u.includes('/policies') ? POLICIES : [] });
+		});
+		await page.goto('/parent/children');
+		const fill = async (who, label) => {
+			const bar = page.getByRole('article', { name: `${who} progress` }).getByRole('progressbar', { name: `${label} used` });
+			await expect(bar).toBeVisible();
+			return bar.evaluate((el) => {
+				const span = el.firstElementChild;
+				const sr = span.getBoundingClientRect(), tr = el.getBoundingClientRect();
+				return { ratio: sr.width / tr.width, covers: sr.height >= tr.height - 1 && sr.height >= 8 && sr.top >= tr.top - 1 && sr.bottom <= tr.bottom + 1, tall: tr.height, bg: getComputedStyle(span).backgroundColor, track: getComputedStyle(el).backgroundColor };
+			});
+		};
+		const partial = await fill('Maya', 'Minutes');
+		expect(Math.abs(partial.ratio - 14.5 / 25)).toBeLessThan(0.03);
+		expect(partial.covers, `fill must span the track (track ${partial.tall}px tall)`).toBe(true);
+		expect(partial.bg).not.toBe(partial.track);
+		expect(partial.bg).not.toBe('rgba(0, 0, 0, 0)');
+		expect((await fill('Theo', 'Videos')).ratio).toBe(0);
+		const full = await fill('Theo', 'Minutes');
+		expect(full.ratio).toBeGreaterThan(0.99);
+		expect(full.bg).not.toBe(partial.bg);
+		if (shots) await page.screenshot({ path: `${shots}/progress-bars-${scheme}-390.png`, fullPage: true });
+	});
+
 test('a channel shows a live allowed/excluded count before its filters are saved', async ({ page }) => {
 	const policy = { ...POLICIES[0], rules: { exclude_shorts: false, min_minutes: null, max_minutes: null, title_has: [], title_lacks: [] }, allowed_count: 3, excluded_count: 0 };
 	const puts = [];
