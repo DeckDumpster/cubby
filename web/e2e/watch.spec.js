@@ -452,9 +452,9 @@ test('the daily window closing counts as time left', async ({ page }) => {
 	await expect(page.getByTestId('notice')).toContainText('After 4 more minutes, videos will stop.');
 });
 
-test('a notice is never drawn over the player, on phone and iPad widths, and stays in fullscreen', async ({ page }) => {
-	await setup(page, { play: { grant_id: 'g1', remaining: { videos: 3, minutes: null } } });
-	for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { width: 820, height: 1180 }]]) {
+for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { width: 820, height: 1180 }]]) {
+	test(`a notice is never drawn over the player at ${name} width, and stays in fullscreen`, async ({ page }) => {
+		await setup(page, { play: { grant_id: 'g1', remaining: { videos: 3, minutes: null } } });
 		await page.setViewportSize(size);
 		await page.goto('/watch');
 		await page.getByRole('button', { name: /First video/ }).click();
@@ -469,5 +469,5 @@ test('a notice is never drawn over the player, on phone and iPad widths, and sta
 		const p2 = await page.locator('.player').boundingBox();
 		expect(n2.y).toBeGreaterThanOrEqual(p2.y + p2.height - 1);
 		await page.screenshot({ path: `${OUT}/notice-${name}-fullscreen.png` });
-	}
-});
+	});
+}
