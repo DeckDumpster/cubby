@@ -368,6 +368,36 @@ test('title filters are separate phrase chips and the count stays after saving',
 	if (shots) await page.screenshot({ path: `${shots}/title-filters-390.png`, fullPage: true });
 });
 
+test('filter phrase chips stay compact with the remove button on the text line', async ({ page }) => {
+	const policy = { ...POLICIES[0], rules: { exclude_shorts: false, min_minutes: null, max_minutes: null, title_has: ['episode', 'full show', 'live'], title_lacks: ['how to', 'a, b', 'trailer'] }, allowed_count: 3, excluded_count: 4 };
+	await page.route('**/api/parent/**', (route) => {
+		const u = route.request().url();
+		return route.fulfill({ json: u.includes('/children') ? CHILDREN : u.includes('/policies') ? [policy] : u.includes('/library') ? { groups: [] } : [] });
+	});
+	for (const scheme of ['light', 'dark'])
+		for (const [w, h] of [[390, 844], [1280, 800]]) {
+			await page.emulateMedia({ colorScheme: scheme });
+			await page.setViewportSize({ width: w, height: h });
+			await page.goto('/parent/allow');
+			await page.getByText('Filters', { exact: false }).first().click();
+			const chips = page.locator('li.chip');
+			await expect(chips).toHaveCount(6);
+			for (let i = 0; i < 6; i++) {
+				const chip = await chips.nth(i).boundingBox();
+				const text = await chips.nth(i).locator('.grow').boundingBox();
+				const btn = await chips.nth(i).getByRole('button').boundingBox();
+				expect(chip.height, `chip ${i} height at ${w}`).toBeLessThan(36);
+				expect(Math.abs((btn.y + btn.height / 2) - (text.y + text.height / 2)), `chip ${i} button on text line at ${w}`).toBeLessThan(4);
+				expect(btn.x).toBeGreaterThan(text.x + text.width - 1);
+			}
+			const add = page.locator('.add').first();
+			const inp = await add.locator('input').boundingBox();
+			const plus = await add.getByRole('button').boundingBox();
+			expect(Math.abs(inp.y - plus.y)).toBeLessThan(4);
+			if (shots && w === 390) await page.screenshot({ path: `${shots}/chips-${scheme}-390.png`, fullPage: true });
+		}
+});
+
 test('grant history offers (Remove) on a live grant and shows a removed one struck through', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	let removed = null;

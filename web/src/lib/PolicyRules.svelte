@@ -142,8 +142,12 @@
 	.grow { flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; }
 	.phrases { border: 0; padding: 0; margin: 0; display: grid; gap: var(--space-1); min-width: 0; }
 	.chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-	.chip { display: flex; align-items: center; gap: var(--space-1); padding: 0 0 0 var(--space-2); border: 1px solid var(--muted); border-radius: 999px; }
-	.add { display: flex; gap: var(--space-1); }
+	ul.chips li.chip { background: transparent; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: var(--space-1); max-width: 100%; padding: 0 0 0 var(--space-3); border: 1px solid var(--muted); border-radius: 999px; line-height: 1.5; }
+	.chips .chip .grow { flex: 0 1 auto; overflow-wrap: break-word; }
+	.chips .chip button { position: relative; min-height: 0; height: 1.5rem; min-width: 1.5rem; margin-right: 0.125rem; padding: 0; border: 0; border-radius: 999px; background: transparent; line-height: 1; }
+	.chips .chip button::after { content: ''; position: absolute; inset: -0.5rem -0.25rem; }
+	.add { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--space-1); }
+	.add button { flex: none; min-width: var(--touch); padding: 0 var(--space-3); }
 	.add input { flex: 1 1 auto; min-width: 0; }
 	.actions { display: flex; gap: var(--space-2); }
 	.muted { color: var(--muted); font-size: 0.85rem; }
