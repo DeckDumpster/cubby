@@ -293,6 +293,36 @@ async fn the_library_lists_groups_then_a_groups_videos_and_searches_them() {
 }
 
 #[tokio::test]
+async fn the_library_videos_carry_their_duration_or_null() {
+    let e = env().await;
+    e.videos();
+    e.family()
+        .execute("UPDATE videos SET duration_s=423 WHERE youtube_id='v1'", [])
+        .unwrap();
+    e.family()
+        .execute(
+            "UPDATE videos SET duration_s=NULL WHERE youtube_id='v2'",
+            [],
+        )
+        .unwrap();
+    e.parent(
+        "POST",
+        "/api/parent/policies",
+        Some(json!({"url": "youtube.com/channel/ch1"})),
+    )
+    .await;
+    let (_, vids) = e
+        .parent(
+            "GET",
+            "/api/parent/library/videos?group=ch1&sort=title",
+            None,
+        )
+        .await;
+    assert_eq!(vids["videos"][0]["duration_s"], 423);
+    assert!(vids["videos"][1]["duration_s"].is_null());
+}
+
+#[tokio::test]
 async fn approving_a_more_from_channel_request_adds_a_policy_and_opens_the_channel() {
     let e = env().await;
     e.videos();

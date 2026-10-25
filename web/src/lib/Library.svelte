@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { api, fmtWatched } from '$lib/parent.js';
+	import { api, fmtWatched, fmtLength } from '$lib/parent.js';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import { getParent } from '$lib/parentState.svelte.js';
 
 	type Source = { policy_id: string; kind: string; youtube_id: string; count: number };
 	type Group = { key: string; title: string; count: number; playlists: Source[] };
-	type Vid = { youtube_id: string; title: string; channel_title: string; policy_id: string; plays: number; watched_s: number };
+	type Vid = { youtube_id: string; title: string; channel_title: string; policy_id: string; plays: number; watched_s: number; duration_s: number | null };
 	type Page = { videos: Vid[]; total: number; loading: boolean };
 
 	let { view }: { view: 'allow' | 'review' } = $props();
@@ -110,6 +110,7 @@
 			{#each p.videos as v (v.youtube_id + v.policy_id)}
 				<li>
 					<span class="grow">{v.title || v.youtube_id}</span>
+					<span class="stat length" title="Video length">{fmtLength(v.duration_s)}</span>
 					<span class="stat" title="Total plays">{v.plays} {v.plays === 1 ? 'play' : 'plays'}</span>
 					<span class="stat" title="Total time watched">{fmtWatched(v.watched_s)}</span>
 					<span class="actions">

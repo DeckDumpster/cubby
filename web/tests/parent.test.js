@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { windowsFromText, windowsToText, fmtWatched, budgetBody, requestLabel, rulesBody, phraseFromText, withPhrase } from '../src/lib/parent.js';
+import { windowsFromText, windowsToText, fmtWatched, fmtLength, budgetBody, requestLabel, rulesBody, phraseFromText, withPhrase } from '../src/lib/parent.js';
 
 test('windows text round-trips', () => {
 	const w = windowsFromText('07:00-12:00, 14:00-19:30');
@@ -81,4 +81,12 @@ test('withPhrase rejects empties and repeats ignoring case', () => {
 	assert.deepEqual(withPhrase([], '"How To"'), ['How To']);
 	assert.deepEqual(withPhrase(['How To'], 'how to'), ['How To']);
 	assert.deepEqual(withPhrase(['a'], '  '), ['a']);
+});
+
+test('a video length reads m:ss, h:mm:ss, and never 0:00 when unknown', () => {
+	assert.equal(fmtLength(423), '7:03');
+	assert.equal(fmtLength(3725), '1:02:05');
+	assert.equal(fmtLength(null), '—');
+	assert.equal(fmtLength(undefined), '—');
+	assert.equal(fmtLength(0), '—');
 });
