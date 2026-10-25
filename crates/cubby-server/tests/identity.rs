@@ -444,9 +444,9 @@ async fn play_beat_and_http_telemetry_reach_the_otlp_sink() {
     };
     assert_eq!(refused[0].label("reason"), Some("not-allowed"));
 
-    // Move the grant's last beat back so the next beat measures 60 watched seconds.
+    // Move the last beat back 30s: far enough to measure watch time, well inside the 60s reap timeout.
     conn.execute(
-        "UPDATE play_grants SET last_beat_at = last_beat_at - 60",
+        "UPDATE play_grants SET last_beat_at = last_beat_at - 30",
         [],
     )
     .unwrap();
