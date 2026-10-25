@@ -105,9 +105,9 @@ test.describe('hermetic stack', () => {
 		});
 
 		await test.step('home shows the allowed video and the handle channel video, and no other', async () => {
-			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
+			await expect(child.getByRole('link', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
 			await expect(child.getByText(VIDEOS[SLIME].title)).toHaveCount(0);
-			await expect(child.getByRole('button', { name: VIDEOS[HANDLE.video].title }).first()).toBeVisible();
+			await expect(child.getByRole('link', { name: VIDEOS[HANDLE.video].title }).first()).toBeVisible();
 			await expect
 				.poll(() => child.locator('img.thumb').evaluateAll((imgs) => imgs.length > 0 && imgs.every((i) => i.naturalWidth > 0)))
 				.toBe(true);
@@ -117,7 +117,7 @@ test.describe('hermetic stack', () => {
 			await child.getByLabel('search').fill('volcano');
 			await child.getByRole('button', { name: 'Search' }).click();
 			await expect(child.getByRole('heading', { name: 'Videos about volcano' })).toBeVisible();
-			await expect(child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
+			await expect(child.getByRole('link', { name: VIDEOS[VOLCANO].title }).first()).toBeVisible();
 			await child.getByLabel('search').fill('slime');
 			await child.getByRole('button', { name: 'Search' }).click();
 			await expect(child.getByText('Nothing found.')).toBeVisible();
@@ -127,7 +127,7 @@ test.describe('hermetic stack', () => {
 
 		await test.step('playback starts: a play grant is created', async () => {
 			const play = child.waitForResponse((r) => r.url().endsWith('/api/child/play'));
-			await child.getByRole('button', { name: VIDEOS[VOLCANO].title }).first().click();
+			await child.getByRole('link', { name: VIDEOS[VOLCANO].title }).first().click();
 			const res = await play;
 			expect(res.status()).toBe(200);
 			expect((await res.json()).grant_id, 'no play grant was created').toBeTruthy();

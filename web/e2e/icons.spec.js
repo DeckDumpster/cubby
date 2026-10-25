@@ -34,13 +34,13 @@ test('the manifest parses and every icon it names resolves', async ({ request })
 	const res = await request.get('/assets/manifest.webmanifest');
 	expect(res.headers()['content-type']).toMatch(/manifest\+json|application\/json/);
 	const m = await res.json();
-	expect(m).toMatchObject({ name: 'Cubby', short_name: 'Cubby', display: 'standalone', start_url: '/watch' });
+	expect(m).toMatchObject({ name: 'Cubby', short_name: 'Cubby', display: 'standalone', start_url: '/' });
 	expect(m.theme_color).toBe('#4f46e5');
 	expect(m.icons.some((i) => i.purpose === 'maskable' && i.sizes === '512x512')).toBe(true);
 	for (const i of m.icons) expect((await request.get(i.src)).status(), i.src).toBe(200);
 });
 
-for (const path of ['/watch', '/parent']) {
+for (const path of ['/', '/parent']) {
 	test(`${path} links the icons and manifest`, async ({ page }) => {
 		await page.route('**/api/**', (r) => r.fulfill({ status: 401, json: { error: 'x' } }));
 		await page.goto(path);
@@ -58,6 +58,6 @@ test('screenshot: browser tab and iPad home-screen icon', async ({ page }) => {
 		<div style="padding:24px;display:flex;gap:24px;align-items:flex-end">
 			<div style="text-align:center"><img src="/assets/icons/apple-touch-icon-v1.png" width="180" height="180" style="border-radius:40px"><div>Cubby</div></div>
 			<img src="/assets/icons/favicon-v1.ico" width="48" height="48"></div></body>`);
-	await page.goto('/watch').catch(() => {});
+	await page.goto('/').catch(() => {});
 	await page.screenshot({ path: `${OUT}/icons.png`, clip: { x: 0, y: 0, width: 360, height: 280 } });
 });

@@ -72,7 +72,7 @@ async function check(page, name, size) {
 	expect(overflow).toBeLessThanOrEqual(0);
 }
 
-const first = (page) => page.getByRole('button', { name: /Video number 1 / }).first();
+const first = (page) => page.getByRole('link', { name: /Video number 1 / }).first();
 
 for (const [size, viewport] of SIZES) {
 	test.describe(size, () => {
@@ -80,7 +80,7 @@ for (const [size, viewport] of SIZES) {
 
 		test('pairing', async ({ page }) => {
 			await setup(page, { paired: false });
-			await page.goto('/watch');
+			await page.goto('/');
 			const input = page.getByLabel('pairing code');
 			await input.fill('ab3d9z');
 			await expect(input).toHaveValue('AB3D9Z');
@@ -94,7 +94,7 @@ for (const [size, viewport] of SIZES) {
 
 		test('pairing error', async ({ page }) => {
 			await setup(page, { paired: false, pairStatus: 400 });
-			await page.goto('/watch');
+			await page.goto('/');
 			await page.getByLabel('pairing code').fill('AAAAAA');
 			await page.getByRole('button', { name: 'Go' }).click();
 			await expect(page.getByRole('alert')).toBeVisible();
@@ -103,21 +103,21 @@ for (const [size, viewport] of SIZES) {
 
 		test('home', async ({ page }) => {
 			await setup(page);
-			await page.goto('/watch');
+			await page.goto('/');
 			await expect(first(page)).toBeVisible();
 			await check(page, 'home', size);
 		});
 
 		test('empty', async ({ page }) => {
 			await setup(page, { home: EMPTY });
-			await page.goto('/watch');
+			await page.goto('/');
 			await expect(page.getByTestId('nothing-allowed')).toBeVisible();
 			await check(page, 'empty', size);
 		});
 
 		test('search', async ({ page }) => {
 			await setup(page);
-			await page.goto('/watch');
+			await page.goto('/');
 			await page.getByLabel('search').fill('cats');
 			await page.getByRole('button', { name: 'Search' }).click();
 			await expect(page.getByRole('heading', { name: /Videos about cats/ })).toBeVisible();
@@ -126,7 +126,7 @@ for (const [size, viewport] of SIZES) {
 
 		test('player', async ({ page }) => {
 			await setup(page);
-			await page.goto('/watch');
+			await page.goto('/');
 			await first(page).click();
 			await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 			await check(page, 'player', size);
@@ -134,7 +134,7 @@ for (const [size, viewport] of SIZES) {
 
 		test('end card', async ({ page }) => {
 			await setup(page);
-			await page.goto('/watch');
+			await page.goto('/');
 			await first(page).click();
 			await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 			await page.evaluate(() => window.__state(0));
@@ -144,7 +144,7 @@ for (const [size, viewport] of SIZES) {
 
 		test('refused', async ({ page }) => {
 			await setup(page, { play: { refused: 'out-of-videos', next_start: null } });
-			await page.goto('/watch');
+			await page.goto('/');
 			await first(page).click();
 			await expect(page.getByTestId('refusal')).toBeVisible();
 			await check(page, 'refused', size);
@@ -154,7 +154,7 @@ for (const [size, viewport] of SIZES) {
 			await setup(page);
 			let beats = 0;
 			await page.route('**/api/child/grant/*/beat', (r) => r.fulfill({ json: { remaining: { videos: 0, minutes: null }, stop: beats++ === 0 } }));
-			await page.goto('/watch');
+			await page.goto('/');
 			await first(page).click();
 			await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 			await page.evaluate(() => window.__state(2));
@@ -168,7 +168,7 @@ test.describe('pause card in the shell', () => {
 	test.use({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0) CubbyShell/1.0', viewport: SIZES[0][1] });
 	test('pause', async ({ page }) => {
 		await setup(page);
-		await page.goto('/watch');
+		await page.goto('/');
 		await first(page).click();
 		await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 		await page.evaluate(() => window.__state(1));
@@ -181,7 +181,7 @@ test.describe('pause card in the shell', () => {
 test('the grown-up unpair control returns to the pairing screen', async ({ page }) => {
 	await setup(page);
 	page.on('dialog', (d) => d.accept());
-	await page.goto('/watch');
+	await page.goto('/');
 	await page.getByRole('button', { name: /unpair/i }).click();
 	await expect(page.getByLabel('pairing code')).toBeVisible();
 	expect(await page.evaluate(() => localStorage.getItem('cubby_token'))).toBeNull();

@@ -617,7 +617,20 @@ async fn play_route(
         PlayOutcome::Granted {
             grant_id,
             remaining,
-        } => json!({"grant_id": grant_id, "remaining": remaining_json(remaining, window_left)}),
+        } => {
+            // A granted video is by definition allowed, so its title may be shown: a shared
+            // /videos/{id} link has no tile to take it from.
+            let title: Option<String> = conn
+                .query_row(
+                    "SELECT title FROM videos WHERE youtube_id=?1",
+                    params![body.youtube_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .unwrap_or(None)
+                .flatten();
+            json!({"grant_id": grant_id, "title": title, "remaining": remaining_json(remaining, window_left)})
+        }
         PlayOutcome::Refused { reason, next_start } => {
             json!({"refused": reason, "next_start": next_start,
                 "limit": limit_json(&conn, &dev.child_id, unix_now()).map_err(ApiError::internal)?})

@@ -21,7 +21,7 @@ test('a primed HTTP cache for /api/child/home does not survive a reload', async 
 	await new Promise((r) => server.listen(8790, '127.0.0.1', r));
 	try {
 		await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
-		await page.goto('/watch');
+		await page.goto('/');
 		await expect.poll(() => hits).toBeGreaterThan(0);
 		// the stale entry an old device holds: stored by a plain fetch, which the server allows
 		await page.evaluate(() => fetch('/api/child/home').then((r) => r.text()));
