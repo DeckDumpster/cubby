@@ -932,6 +932,7 @@ async fn once_the_grace_is_over_the_child_api_refuses_browsing_until_a_grant() {
         "/api/child/home",
         "/api/child/search?q=one",
         "/api/child/next?after=v1",
+        "/api/child/recent",
     ] {
         let (s, v) = e.child_get(&tok, p).await;
         assert_eq!(s, StatusCode::FORBIDDEN, "{p}");

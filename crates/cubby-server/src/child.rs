@@ -356,11 +356,12 @@ async fn recent_route(
     Extension(ParentOf(family_id)): Extension<ParentOf>,
     Extension(dev): Extension<Device>,
     Query(p): Query<RecentParams>,
-) -> Result<Json<Value>, ApiError> {
-    let conn = open_own(&state, &family_id)?;
+) -> Result<Json<Value>, Response> {
+    let conn = open_own(&state, &family_id).map_err(IntoResponse::into_response)?;
+    guard_locked(&conn, &dev.child_id, crate::play::unix_now())?;
     recent_json(&conn, &dev.child_id, &p)
         .map(Json)
-        .map_err(internal)
+        .map_err(|e| internal(e).into_response())
 }
 
 async fn next_route(
