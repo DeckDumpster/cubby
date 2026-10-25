@@ -9,7 +9,7 @@ use crate::schema;
 /// The family schema version this build understands: one migration per version.
 pub const FAMILY_VERSION: i64 = MIGRATIONS.len() as i64;
 
-const MIGRATIONS: [&str; 9] = [
+const MIGRATIONS: [&str; 10] = [
     include_str!("family_v1.sql"),
     include_str!("family_v2.sql"),
     include_str!("family_v3.sql"),

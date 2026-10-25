@@ -366,6 +366,7 @@ test('title filters are separate phrase chips and the count stays after saving',
 	expect(puts[0].title_has).toEqual(['episode', 'full show']);
 	await expect(page.getByText('filtered out')).toBeVisible();
 	if (shots) await page.screenshot({ path: `${shots}/title-filters-390.png`, fullPage: true });
+});
 
 test('grant history offers (Remove) on a live grant and shows a removed one struck through', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
