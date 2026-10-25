@@ -743,8 +743,8 @@ mod tests {
     fn a_minutes_grant_lifts_the_minutes_cap() {
         let c = db();
         c.execute(
-            "INSERT INTO budgets(child_id,video_equivalents,window_s,minutes_cap,cutoff_mid_play,daily_windows)
-             VALUES ('kid',NULL,86400,10,0,NULL)",
+            "INSERT INTO budgets(child_id,video_equivalents,minutes_cap,cutoff_mid_play,daily_windows)
+             VALUES ('kid',NULL,10,0,NULL)",
             [],
         )
         .unwrap();
@@ -760,9 +760,9 @@ mod tests {
         budget_row(&c, 1.0, 0, "");
         spend_one_video(&c);
         grant_extra(&c, "kid", 1.0, 0.0, "mum", None, T0 + 710).unwrap();
-        // Local midnight (UTC) is 12 h after T0; the spent video is still inside the 24 h window.
-        assert_eq!(refused(&c, T0 + 12 * 3600 - 1), None);
-        assert_eq!(refused(&c, T0 + 12 * 3600), Some("out-of-videos"));
+        // Local midnight (UTC) is 12 h after T0: the extra counts until then and not after.
+        assert_eq!(extras(&c, "kid", T0 + 12 * 3600 - 1).unwrap(), (1.0, 0.0));
+        assert_eq!(extras(&c, "kid", T0 + 12 * 3600).unwrap(), (0.0, 0.0));
     }
 
     #[test]
