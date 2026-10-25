@@ -32,6 +32,19 @@ export function fmtWatched(s) {
 }
 
 /**
+ * A video's total length: m:ss under an hour, h:mm:ss above, and an em dash when unknown.
+ * @param {number|null|undefined} s
+ */
+export function fmtLength(s) {
+	if (s == null || !(s > 0)) return '—';
+	const t = Math.round(s);
+	const h = Math.floor(t / 3600);
+	const m = Math.floor((t % 3600) / 60);
+	const sec = String(t % 60).padStart(2, '0');
+	return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+/**
  * @param {{videos: string, minutes: string, windows: string, cutoff: boolean, veMinutes?: string}} form
  * @returns {{video_equivalents: number|null, minutes_cap: number|null, ve_minutes: number|null,
  *   cutoff_mid_play: boolean, daily_windows: [string, string][]} | null} null when a field is junk

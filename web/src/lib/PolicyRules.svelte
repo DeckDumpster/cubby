@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, rulesBody, withPhrase } from '$lib/parent.js';
+	import { api, rulesBody, withPhrase, fmtLength } from '$lib/parent.js';
 	import { getParent } from '$lib/parentState.svelte.js';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import type { Policy } from '$lib/parentState.svelte.js';
@@ -79,7 +79,6 @@
 		await ps.act('PUT', `/api/parent/policies/${policy.id}/rules`, body);
 	}
 
-	const dur = (s: number | null) => (s == null ? '?' : s < 60 ? `${s}s` : `${Math.round(s / 60)} min`);
 </script>
 
 <details class="rules" bind:open>
@@ -118,7 +117,7 @@
 				<summary>Excluded videos</summary>
 				<ul>
 					{#each counts.excluded_videos as v (v.youtube_id)}
-						<li><span class="grow">{v.title || v.youtube_id}</span> <small>{dur(v.duration_s)}</small></li>
+						<li><span class="grow">{v.title || v.youtube_id}</span> <small>{fmtLength(v.duration_s)}</small></li>
 					{/each}
 				</ul>
 				{#if counts.excluded > counts.excluded_videos.length}<p class="muted">…and {counts.excluded - counts.excluded_videos.length} more.</p>{/if}

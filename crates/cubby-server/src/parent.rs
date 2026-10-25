@@ -590,7 +590,7 @@ async fn library_videos(
         "youtube_id": v.youtube_id, "title": v.title, "channel_title": v.channel_title,
         "policy_id": v.policy_id, "policy_kind": v.policy_kind,
         "policy_youtube_id": v.policy_youtube_id, "child_id": v.child_id,
-        "plays": v.plays, "watched_s": v.watched_s})).collect::<Vec<_>>()}),
+        "plays": v.plays, "watched_s": v.watched_s, "duration_s": v.duration_s})).collect::<Vec<_>>()}),
     ))
 }
 
