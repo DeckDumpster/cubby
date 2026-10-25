@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, rulesBody } from '$lib/parent.js';
 	import { getParent } from '$lib/parentState.svelte.js';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import type { Policy } from '$lib/parentState.svelte.js';
 
 	let { policy }: { policy: Policy } = $props();
@@ -60,7 +61,7 @@
 
 	async function save() {
 		const body = rulesBody(form);
-		if (!body) return;
+		if (!body) throw new Error('Check the filters');
 		await ps.act('PUT', `/api/parent/policies/${policy.id}/rules`, body);
 	}
 
@@ -92,7 +93,7 @@
 		{/if}
 	{/if}
 	<div class="actions">
-		<button class="primary" disabled={bad} onclick={save}>Save filters</button>
+		<ActionButton class="primary" disabled={bad} run={save} done="Saved the filters" fail="save the filters">Save filters</ActionButton>
 		<button onclick={reset}>Cancel</button>
 	</div>
 	<p class="muted">Rules apply to every video here and to every new upload. Allowing a single video outright overrides them.</p>

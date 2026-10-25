@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import Progress from '$lib/Progress.svelte';
+	import Toasts from '$lib/Toasts.svelte';
 	import { ParentState, setParent } from '$lib/parentState.svelte.js';
 
 	let { children } = $props();
@@ -47,6 +48,7 @@
 
 {@render children()}
 </div>
+<Toasts />
 
 <style>
 	.parent { max-width: 56rem; margin: 0 auto; padding: 0 var(--space-4) var(--space-5); }

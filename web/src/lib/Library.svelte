@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, fmtWatched } from '$lib/parent.js';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import { getParent } from '$lib/parentState.svelte.js';
 
 	type Source = { policy_id: string; kind: string; youtube_id: string; count: number };
@@ -113,17 +114,17 @@
 					<span class="stat" title="Total time watched">{fmtWatched(v.watched_s)}</span>
 					<span class="actions">
 						{#if view === 'review'}
-							<button class="primary" onclick={() => act('POST', `/api/parent/videos/${v.youtube_id}/approve`)}>Approve</button>
+							<ActionButton class="primary" run={() => act('POST', `/api/parent/videos/${v.youtube_id}/approve`)} done="Approved {v.title || v.youtube_id}" fail="approve it">Approve</ActionButton>
 						{/if}
-						<button class="danger" onclick={() => act('POST', `/api/parent/videos/${v.youtube_id}/block`)}>Block</button>
+						<ActionButton class="danger" run={() => act('POST', `/api/parent/videos/${v.youtube_id}/block`)} done="Blocked {v.title || v.youtube_id}" fail="block it">Block</ActionButton>
 					</span>
 				</li>
 			{/each}
 		</ul>
 		{#if p.videos.length < p.total}
-			<button class="more" disabled={p.loading} onclick={() => ps.run(() => fetchPage(key, group, policy, true))}>
+			<ActionButton class="more" disabled={p.loading} run={() => fetchPage(key, group, policy, true)} fail="load more videos">
 				Show more ({p.videos.length} of {p.total})
-			</button>
+			</ActionButton>
 		{/if}
 	{:else}
 		<p class="muted">Loading…</p>
@@ -197,6 +198,6 @@
 	.lib-videos li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
 	.stat { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-	.more { width: 100%; margin-top: var(--space-2); }
+	.lib :global(.more) { width: 100%; margin-top: var(--space-2); }
 	.muted { color: var(--muted); }
 </style>
