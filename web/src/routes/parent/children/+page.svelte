@@ -7,6 +7,13 @@
 <svelte:head><title>Children · Cubby</title></svelte:head>
 
 <section class="panel">
+	<h2>When time is up</h2>
+	<label>Minutes to keep browsing <input inputmode="decimal" data-testid="grace-minutes" bind:value={ps.graceMinutes} /></label>
+	<small>When a child reaches their limit, or their viewing window closes, they can still look around and save videos for this long, but not play. Then the whole child site shows "All done for today" until the next day starts or you give them more time.</small>
+	<ActionButton class="primary" run={ps.saveGrace} done="Saved how long a child can keep browsing" fail="save that">Save</ActionButton>
+</section>
+
+<section class="panel">
 	<h2>Children</h2>
 	{#each ps.children as c (c.id)}
 		<div class="card">
