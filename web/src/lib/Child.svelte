@@ -187,7 +187,10 @@
 
 	onMount(() => {
 		paired = !!token.get();
-		if (paired) loadHome();
+		if (paired) {
+			loadHome();
+			preloadPlayer();
+		}
 		const leave = () => leaveWatch();
 		const fsChange = () => {
 			if (fsMode === 'api' && !fsElement()) fsMode = 'off';
@@ -204,6 +207,11 @@
 		};
 	});
 
+	// Safari grants sound-on autoplay only for a moment after the tap, so the player script must already be here when the tap lands.
+	function preloadPlayer() {
+		loadYT(window as any).catch(() => {});
+	}
+
 	async function pair(e: Event) {
 		e.preventDefault();
 		pairError = '';
@@ -211,6 +219,7 @@
 		if (status === 200 && data?.token) {
 			token.set(data.token);
 			paired = true;
+			preloadPlayer();
 			await loadHome();
 		} else {
 			pairError = 'That code did not work. Ask a grown-up for a new one.';
