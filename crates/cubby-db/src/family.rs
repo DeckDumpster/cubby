@@ -9,13 +9,14 @@ use crate::schema;
 /// The family schema version this build understands: one migration per version.
 pub const FAMILY_VERSION: i64 = MIGRATIONS.len() as i64;
 
-const MIGRATIONS: [&str; 6] = [
+const MIGRATIONS: [&str; 7] = [
     include_str!("family_v1.sql"),
     include_str!("family_v2.sql"),
     include_str!("family_v3.sql"),
     include_str!("family_v4.sql"),
     include_str!("family_v5.sql"),
     include_str!("family_v6.sql"),
+    include_str!("family_v7.sql"),
 ];
 
 /// Brings `conn` up to this build's family schema; refuses a newer one.
@@ -56,6 +57,30 @@ mod tests {
             open_family(&p),
             Err(crate::DbError::NewerSchema { .. })
         ));
+    }
+
+    #[test]
+    fn the_rolling_window_column_is_gone_and_budgets_survive() {
+        let mut c = Connection::open_in_memory().unwrap();
+        for m in &MIGRATIONS[..6] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", 6).unwrap();
+        c.execute_batch(
+            "INSERT INTO children(id,name,avatar,tz) VALUES ('a','A','','UTC');
+             INSERT INTO budgets(child_id,video_equivalents,window_s,minutes_cap) VALUES ('a',3,3600,30);",
+        )
+        .unwrap();
+        migrate_family(&mut c).unwrap();
+        let (v, m): (f64, i64) = c
+            .query_row(
+                "SELECT video_equivalents, minutes_cap FROM budgets",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((v, m), (3.0, 30));
+        assert!(c.prepare("SELECT window_s FROM budgets").is_err());
     }
 
     #[test]

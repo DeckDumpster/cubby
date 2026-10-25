@@ -420,10 +420,8 @@ async fn children_budgets_devices_and_history_are_reachable() {
         .parent(
             "PUT",
             &format!("/api/parent/children/{child}/budget"),
-            Some(
-                json!({"video_equivalents": 2.0, "minutes_cap": 45, "window_s": 86400,
-                "cutoff_mid_play": false, "daily_windows": [["00:00", "23:59"]]}),
-            ),
+            Some(json!({"video_equivalents": 2.0, "minutes_cap": 45,
+                "cutoff_mid_play": false, "daily_windows": [["00:00", "23:59"]]})),
         )
         .await;
     assert_eq!(s, StatusCode::OK, "{b}");
@@ -643,11 +641,16 @@ async fn progress_reports_used_and_left_against_the_budget_and_who_is_watching()
         .parent(
             "PUT",
             &format!("/api/parent/children/{child}/budget"),
-            Some(json!({"video_equivalents": 3.0, "minutes_cap": 60, "window_s": 86400})),
+            Some(json!({"video_equivalents": 3.0, "minutes_cap": 60})),
         )
         .await;
     assert_eq!(s, StatusCode::OK);
     let t = now();
+    let tz: String = e
+        .family()
+        .query_row("SELECT tz FROM children LIMIT 1", [], |r| r.get(0))
+        .unwrap();
+    let today = cubby_core::budget::day_start(&tz, t);
     let dev: String = e
         .family()
         .query_row("SELECT id FROM devices LIMIT 1", [], |r| r.get(0))
@@ -657,7 +660,7 @@ async fn progress_reports_used_and_left_against_the_budget_and_who_is_watching()
             "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,watched_s,charge,ended_at,end_reason) VALUES
              ('g1',?1,?2,'v1',?3,?3,300,0.5,?3,'ended'),
              ('g2',?1,?2,'v2',?4,?4,600,1.0,?4,'ended')",
-            rusqlite::params![child, dev, t - 7200, t - 3600],
+            rusqlite::params![child, dev, today + 1, today + 2],
         )
         .unwrap();
 
@@ -671,7 +674,11 @@ async fn progress_reports_used_and_left_against_the_budget_and_who_is_watching()
     assert_eq!(k["minutes"]["limit"], 60.0);
     assert_eq!(k["minutes"]["used"], 15.0);
     assert_eq!(k["minutes"]["left"], 45.0);
-    assert_eq!(k["resets_at"], t - 7200 + 86400);
+    assert_eq!(
+        k["resets_at"],
+        cubby_core::budget::next_midnight(&tz, t),
+        "the reset is the next local midnight, not a rolling 24 h"
+    );
     assert_eq!(k["window"]["restricted"], false);
     assert!(k["watching"].is_null());
 

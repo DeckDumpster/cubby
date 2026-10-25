@@ -67,25 +67,23 @@ fn child_tz(conn: &Connection, child: &str) -> rusqlite::Result<String> {
 fn load_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
     let row = conn
         .query_row(
-            "SELECT video_equivalents, window_s, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes
+            "SELECT video_equivalents, minutes_cap, cutoff_mid_play, daily_windows, ve_minutes
              FROM budgets WHERE child_id=?1",
             [child],
             |r| {
                 Ok((
                     r.get::<_, Option<f64>>(0)?,
-                    r.get::<_, Option<i64>>(1)?,
-                    r.get::<_, Option<f64>>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, Option<f64>>(5)?,
+                    r.get::<_, Option<f64>>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<f64>>(4)?,
                 ))
             },
         )
         .optional()?;
-    let Some((ve, window_s, minutes_cap, cutoff, windows, ve_minutes)) = row else {
+    let Some((ve, minutes_cap, cutoff, windows, ve_minutes)) = row else {
         return Ok(Budget {
             video_equivalents: None,
-            window_s: 86_400,
             minutes_cap: None,
             ve_minutes: budget::DEFAULT_VE_MINUTES,
             cutoff_mid_play: false,
@@ -102,7 +100,6 @@ fn load_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
     };
     Ok(Budget {
         video_equivalents: ve,
-        window_s: window_s.filter(|w| *w > 0).unwrap_or(86_400),
         minutes_cap,
         ve_minutes: ve_minutes
             .filter(|m| m.is_finite() && *m > 0.0)
@@ -112,11 +109,12 @@ fn load_budget(conn: &Connection, child: &str) -> rusqlite::Result<Budget> {
     })
 }
 
-fn usage(conn: &Connection, child: &str, b: &Budget, now: i64) -> rusqlite::Result<Usage> {
+/// Totals since the child's last local midnight.
+fn usage(conn: &Connection, child: &str, tz: &str, now: i64) -> rusqlite::Result<Usage> {
     conn.query_row(
         "SELECT COALESCE(SUM(charge),0), COALESCE(SUM(watched_s),0) FROM play_grants
          WHERE child_id=?1 AND granted_at>=?2",
-        params![child, now - b.window_s],
+        params![child, budget::day_start(tz, now)],
         |r| {
             Ok(Usage {
                 charge: r.get(0)?,
@@ -160,8 +158,8 @@ pub fn play(
         });
     }
     let b = load_budget(conn, &dev.child_id)?;
-    let u = usage(conn, &dev.child_id, &b, now)?;
     let tz = child_tz(conn, &dev.child_id)?;
+    let u = usage(conn, &dev.child_id, &tz, now)?;
     if let Err(r) = budget::may_start(&b, u, &tz, now) {
         return Ok(PlayOutcome::Refused {
             reason: r.reason(),
@@ -254,8 +252,8 @@ pub fn beat(
         params![grant_id, now, p.position_s, p.watched_s, new_charge],
     )?;
     let b = load_budget(conn, &dev.child_id)?;
-    let u = usage(conn, &dev.child_id, &b, now)?;
     let tz = child_tz(conn, &dev.child_id)?;
+    let u = usage(conn, &dev.child_id, &tz, now)?;
     Ok(BeatOutcome {
         remaining: budget::remaining(&b, u),
         stop: budget::cutoff(&b, u, &tz, now),
@@ -321,7 +319,7 @@ pub(crate) fn remaining_json_for(
     now: i64,
 ) -> rusqlite::Result<Value> {
     let b = load_budget(conn, child)?;
-    let u = usage(conn, child, &b, now)?;
+    let u = usage(conn, child, &child_tz(conn, child)?, now)?;
     Ok(remaining_json(budget::remaining(&b, u)))
 }
 
@@ -330,13 +328,8 @@ pub(crate) fn remaining_json_for(
 pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlite::Result<Value> {
     let b = load_budget(conn, child)?;
     let tz = child_tz(conn, child)?;
-    let u = usage(conn, child, &b, now)?;
+    let u = usage(conn, child, &tz, now)?;
     let r = budget::remaining(&b, u);
-    let oldest: Option<i64> = conn.query_row(
-        "SELECT MIN(granted_at) FROM play_grants WHERE child_id=?1 AND granted_at>=?2",
-        params![child, now - b.window_s],
-        |r| r.get(0),
-    )?;
     let live = conn
         .query_row(
             "SELECT g.youtube_id, COALESCE(v.title,''), g.granted_at, COALESCE(g.watched_s,0)
@@ -361,7 +354,8 @@ pub(crate) fn progress_json(conn: &Connection, child: &str, now: i64) -> rusqlit
         "videos": side(b.video_equivalents, u.charge, r.videos),
         "ve_minutes": b.ve_minutes,
         "minutes": side(b.minutes_cap, u.watched_s / 60.0, r.minutes),
-        "resets_at": oldest.map(|t| t + b.window_s),
+        "resets_at": (b.video_equivalents.is_some() || b.minutes_cap.is_some())
+            .then(|| budget::next_midnight(&tz, now)),
         "window": {"restricted": !b.daily_windows.is_empty(), "open": next_open.is_none(),
             "opens_at": next_open, "closes_at": closes},
         "watching": live,
@@ -502,11 +496,34 @@ mod tests {
     /// A budget whose video equivalent is 10 minutes, so a fully watched 600 s video costs 1.
     fn budget_row(c: &Connection, ve: f64, cutoff: i64, windows: &str) {
         c.execute(
-            "INSERT OR REPLACE INTO budgets(child_id,video_equivalents,window_s,minutes_cap,cutoff_mid_play,daily_windows,ve_minutes)
-             VALUES ('kid',?1,86400,NULL,?2,?3,10)",
+            "INSERT OR REPLACE INTO budgets(child_id,video_equivalents,minutes_cap,cutoff_mid_play,daily_windows,ve_minutes)
+             VALUES ('kid',?1,NULL,?2,?3,10)",
             params![ve, cutoff, windows],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn usage_resets_at_local_midnight_not_24h_after_the_grant() {
+        let c = db();
+        c.execute("UPDATE children SET tz='America/Los_Angeles'", [])
+            .unwrap();
+        // 23:50 PDT on 2026-10-14 is 06:50 UTC on the 15th.
+        let before = T0 + 18 * 3600 + 50 * 60;
+        c.execute(
+            "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,watched_s,charge)
+             VALUES ('g',?1,'dev','v1',?2,?2,600,1.0)",
+            params!["kid", before],
+        )
+        .unwrap();
+        let la = "America/Los_Angeles";
+        assert_eq!(usage(&c, "kid", la, before + 60).unwrap().charge, 1.0);
+        assert_eq!(usage(&c, "kid", la, before + 20 * 60).unwrap().charge, 0.0);
+        assert_eq!(
+            progress_json(&c, "kid", before).unwrap()["resets_at"],
+            Value::Null,
+            "no limits, no reset"
+        );
     }
 
     fn grant(c: &Connection, vid: &str, now: i64) -> String {

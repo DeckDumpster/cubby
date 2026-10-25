@@ -90,7 +90,7 @@
 					</div>
 				{/each}
 				{#if r.resets_at && (r.videos.limit !== null || r.minutes.limit !== null)}
-					<p class="muted">Resets {when(r.resets_at, r.tz)}</p>
+					<p class="muted">Resets at midnight</p>
 				{/if}
 			</article>
 		{/each}
