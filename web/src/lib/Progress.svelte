@@ -39,6 +39,7 @@
 	});
 
 	let custom: Record<string, { minutes: string; videos: string }> = $state({});
+	let openLive: Record<string, boolean> = $state({});
 	let failed = $state('');
 	const grant = async (id: string, minutes: number, videos: number) => {
 		failed = '';
@@ -75,9 +76,14 @@
 		{#each rows as r (r.child_id)}
 			{@const c = kid(r.child_id)}
 			<article class="pcard" aria-label="{c?.name ?? 'Child'} progress">
-				<h3><span class="avatar" aria-hidden="true">{c?.avatar}</span> {c?.name ?? 'Child'}</h3>
-				{#if r.watching}
-					<p class="live">▶ Watching now: <b>{r.watching.title || 'a video'}</b> <small>({num(r.watching.minutes)} min in)</small></p>
+				<h3>
+					<span class="name"><span class="avatar" aria-hidden="true">{c?.avatar}</span> {c?.name ?? 'Child'}</span>
+					{#if r.watching}
+						<button type="button" class="live" aria-expanded={!!openLive[r.child_id]} aria-controls="live-{r.child_id}" onclick={() => (openLive[r.child_id] = !openLive[r.child_id])}>▶ Watching <span aria-hidden="true">{openLive[r.child_id] ? '▴' : '▾'}</span></button>
+					{/if}
+				</h3>
+				{#if r.watching && openLive[r.child_id]}
+					<p class="livedetail" id="live-{r.child_id}"><b>{r.watching.title || 'a video'}</b> <small>· {num(r.watching.minutes)} min in</small></p>
 				{/if}
 				{#if r.window.restricted && !r.window.open}
 					<p class="state">Viewing is closed{#if r.window.opens_at} until {when(r.window.opens_at, r.tz)}{/if}.</p>
@@ -133,9 +139,11 @@
 	.progress { display: grid; gap: var(--space-3); margin: var(--space-3) 0; }
 	@media (min-width: 640px) { .progress { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); } }
 	.pcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--space-3) var(--space-4); min-width: 0; }
-	.pcard h3 { margin: 0 0 var(--space-2); font-size: 1.05rem; display: flex; gap: var(--space-2); align-items: center; }
+	.pcard h3 { margin: 0 0 var(--space-2); font-size: 1.05rem; display: flex; gap: var(--space-2); align-items: center; min-height: 2.75rem; }
+	.name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 	.pcard p { margin: var(--space-1) 0; overflow-wrap: anywhere; }
-	.live { color: var(--accent); }
+	.live { flex: none; margin-left: auto; min-height: 2.75rem; padding: 0 var(--space-2); background: none; border: 0; font: inherit; font-size: 0.9rem; font-weight: 600; color: var(--accent); cursor: pointer; white-space: nowrap; }
+	.livedetail { color: var(--accent); }
 	.state { color: var(--danger); font-weight: 600; }
 	.muted { color: var(--muted); font-size: 0.9rem; }
 	.meter { margin-top: var(--space-2); }
