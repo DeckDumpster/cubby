@@ -230,7 +230,10 @@ test('the progress card shows used and left against the limits and who is watchi
 	});
 	await page.goto('/parent');
 	const maya = page.getByRole('article', { name: 'Maya progress' });
-	await expect(maya).toContainText('Watching now: How volcanoes work');
+	await expect(maya).toContainText('Watching');
+	await expect(maya).not.toContainText('How volcanoes work');
+	await maya.getByRole('button', { name: /Watching/ }).click();
+	await expect(maya).toContainText('How volcanoes work');
 	await expect(maya).toContainText('1.50 left');
 	await expect(maya).toContainText('45 left');
 	await expect(maya).toContainText('15 of 60 used');
@@ -276,6 +279,35 @@ for (const scheme of ['light', 'dark'])
 		expect(full.bg).not.toBe(partial.bg);
 		if (shots) await page.screenshot({ path: `${shots}/progress-bars-${scheme}-390.png`, fullPage: true });
 	});
+
+test('watching collapses into the title line; cards match height and the expansion survives a poll', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.route('**/api/parent/**', (route) => {
+		const u = route.request().url();
+		return route.fulfill({ json: u.includes('/progress') ? PROGRESS : u.includes('/children') ? CHILDREN : u.includes('/policies') ? POLICIES : [] });
+	});
+	await page.clock.install();
+	await page.goto('/parent');
+	const maya = page.getByRole('article', { name: 'Maya progress' });
+	const theo = page.getByRole('article', { name: 'Theo progress' });
+	const head = (a) => a.locator('h3').evaluate((h) => h.getBoundingClientRect().height);
+	expect(await head(maya)).toBe(await head(theo));
+	const toggle = maya.getByRole('button', { name: /Watching/ });
+	await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+	await expect(maya).not.toContainText('min in');
+	if (shots) await page.screenshot({ path: `${shots}/progress-collapsed-390.png`, fullPage: true });
+	await toggle.click();
+	await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+	await expect(maya).toContainText('How volcanoes work');
+	await expect(maya).toContainText('2 min in');
+	await page.clock.runFor(16000);
+	await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+	await expect(maya).toContainText('How volcanoes work');
+	expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+	if (shots) await page.screenshot({ path: `${shots}/progress-expanded-390.png`, fullPage: true });
+	await toggle.click();
+	await expect(maya).not.toContainText('min in');
+});
 
 test('a channel shows a live allowed/excluded count before its filters are saved', async ({ page }) => {
 	const policy = { ...POLICIES[0], rules: { exclude_shorts: false, min_minutes: null, max_minutes: null, title_has: [], title_lacks: [] }, allowed_count: 3, excluded_count: 0 };
