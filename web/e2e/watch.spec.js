@@ -368,7 +368,7 @@ test('a shield covers the iframe exactly, takes every tap and toggles playback; 
 	await page.setViewportSize({ width: 1024, height: 768 });
 	await startPlaying(page);
 	const same = async () => {
-		const f = await page.locator('iframe[title="fake player"]').boundingBox();
+		const f = await page.locator('.player').boundingBox();
 		const s = await page.getByTestId('shield').boundingBox();
 		expect(s).toEqual(f);
 		expect(await page.evaluate(() => {
