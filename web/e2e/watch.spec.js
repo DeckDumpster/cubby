@@ -137,6 +137,7 @@ test('a fraction of a video left at the end is not "all done"', async ({ page })
 	await setup(page, { next: { ...NEXT, remaining: { videos: 0.62, minutes: 9 } } });
 	await page.goto('/');
 	await page.getByRole('link', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
 	await page.evaluate(() => window.__state(1));
 	await page.evaluate(() => window.__state(0));
 	await expect(page.getByTestId('end-budget')).toHaveText('9 minutes left today');
