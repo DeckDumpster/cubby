@@ -215,6 +215,9 @@ pub struct History {
     pub watched: HashSet<String>,
     /// Started but not finished (under 90% of the duration reached), most recent first.
     pub resumable: Vec<String>,
+    /// Where the latest grant of each video left off, whole seconds: at least 5 s in and under
+    /// 90% of the duration. Videos whose latest grant is outside that range are absent.
+    pub resume_s: HashMap<String, i64>,
     pub liked_channels: HashSet<String>,
 }
 
@@ -234,7 +237,10 @@ pub fn history(conn: &Connection, child_id: &str) -> rusqlite::Result<History> {
     })?;
     for r in rows {
         let (id, pos, dur) = r?;
-        h.watched.insert(id.clone());
+        // Rows are newest grant first: the first row of a video is its latest grant.
+        if h.watched.insert(id.clone()) && pos >= 5.0 && pos < 0.9 * dur as f64 {
+            h.resume_s.insert(id.clone(), pos as i64);
+        }
         if pos < 0.9 * dur as f64 && !h.resumable.contains(&id) {
             h.resumable.push(id);
         }
