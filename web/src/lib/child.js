@@ -22,11 +22,13 @@ export function isShell(ua) {
  */
 export function badge(remaining, total) {
 	const { videos, minutes, ve_minutes } = remaining;
-	const v = videos != null ? Math.max(0, Math.floor(videos)) : null;
-	const m = minutes != null ? Math.max(0, Math.round(minutes)) : null;
-	if (v === 0 || m === 0) return { text: 'All done for today', frac: 0 };
-	const minutesBind = m != null && (v == null || (ve_minutes != null && ve_minutes > 0 && minutes != null && minutes < (videos ?? 0) * ve_minutes));
+	// Done exactly when the server's may_start would refuse.
+	if ((videos != null && videos <= 0) || (minutes != null && minutes <= 0)) return { text: 'All done for today', frac: 0 };
+	const v = videos != null ? Math.floor(videos) : null;
+	const m = minutes != null ? Math.max(1, Math.round(minutes)) : null;
+	const minutesBind = m != null && (v == null || v < 1 || (ve_minutes != null && ve_minutes > 0 && minutes != null && minutes < (videos ?? 0) * ve_minutes));
 	if (minutesBind) return { text: `${m} minute${m === 1 ? '' : 's'} left today`, frac: 1 };
+	if (v != null && v < 1) return { text: 'A little more time today', frac: total ? Math.min(1, (videos ?? 0) / total) : 1 };
 	if (v != null) return { text: `${v} video${v === 1 ? '' : 's'} left today`, frac: total ? Math.min(1, v / total) : 1 };
 	return null;
 }
