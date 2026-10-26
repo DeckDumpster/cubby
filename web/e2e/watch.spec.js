@@ -50,7 +50,7 @@ const FAKE_PLAYER = () => {
 	window.__state = (s) => window.__players.at(-1).opts.events.onStateChange({ data: s });
 };
 
-async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200, fakePlayer = true } = {}) {
+async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200, fakePlayer = true, next = NEXT } = {}) {
 	const calls = [];
 	await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
 	if (fakePlayer) await page.addInitScript(FAKE_PLAYER);
@@ -70,7 +70,7 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		if (path.endsWith('/play')) return json(play);
 		if (path.endsWith('/beat')) return json({ remaining: { videos: 2, minutes: null }, stop: false });
 		if (path.endsWith('/end')) return json({ ok: true });
-		if (path.endsWith('/next')) return json(NEXT);
+		if (path.endsWith('/next')) return json(next);
 		if (path.endsWith('/search')) return json({ tiles: [tile('v9', 'Found it')] });
 		if (path.endsWith('/request')) return requestStatus === 200 ? json({ ok: true }) : route.fulfill({ status: requestStatus, json: {} });
 		return route.fulfill({ status: 404, json: {} });
@@ -131,6 +131,16 @@ test('ENDED destroys the player and shows the end card with suggestions and the 
 	expect(await page.evaluate(() => window.__players[0].destroyed)).toBe(true);
 	expect(calls.find((c) => c.path.endsWith('/end')).body).toEqual({ reason: 'ended' });
 	expect(calls.some((c) => c.path.endsWith('/next'))).toBe(true);
+});
+
+test('a fraction of a video left at the end is not "all done"', async ({ page }) => {
+	await setup(page, { next: { ...NEXT, remaining: { videos: 0.62, minutes: 9 } } });
+	await page.goto('/');
+	await page.getByRole('link', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	await page.evaluate(() => window.__state(1));
+	await page.evaluate(() => window.__state(0));
+	await expect(page.getByTestId('end-budget')).toHaveText('9 minutes left today');
 });
 
 test('a spent budget shows the refusal card and never builds a player', async ({ page }) => {

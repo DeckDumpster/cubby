@@ -32,7 +32,10 @@ test('the badge never contradicts the server when both limits are set', () => {
 	const done = 'All done for today';
 	assert.equal(badge({ videos: 1, minutes: 0, ve_minutes: 15 }, 3)?.text, done);
 	assert.equal(badge({ videos: 0, minutes: 10, ve_minutes: 15 }, 3)?.text, done);
-	assert.equal(badge({ videos: 1.5, minutes: 0.3, ve_minutes: 15 }, 3)?.text, done);
+	assert.equal(badge({ videos: 1.5, minutes: 0.3, ve_minutes: 15 }, 3)?.text, '1 minute left today');
+	assert.equal(badge({ videos: 0.62, minutes: 9, ve_minutes: 15 }, 3)?.text, '9 minutes left today');
+	assert.equal(badge({ videos: 0.62, minutes: null }, 3)?.text, 'A little more time today');
+	assert.ok((badge({ videos: 0.62, minutes: null }, 3)?.frac ?? 0) > 0);
 	assert.equal(badge({ videos: 2, minutes: 5, ve_minutes: 15 }, 3)?.text, '5 minutes left today');
 	assert.equal(badge({ videos: 2, minutes: 60, ve_minutes: 15 }, 3)?.text, '2 videos left today');
 	assert.equal(badge({ videos: 1, minutes: 60 }, 3)?.text, '1 video left today');
