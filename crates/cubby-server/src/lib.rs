@@ -238,6 +238,10 @@ pub fn app_with_hooks(
         ServeDir::new(&config.web_dir).fallback(ServeFile::new(config.web_dir.join("index.html")));
     Ok(Router::new()
         .route("/healthz", get(healthz))
+        .route(
+            "/native/player",
+            get(native_player).with_state(config.web_dir.clone()),
+        )
         .merge(identity::routes(state.clone()))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .nest_service("/thumbs", ServeDir::new(config.data_dir.join("thumbs")))
@@ -320,6 +324,29 @@ async fn parent_page_login(
 /// An unmounted `/api/*` path is a JSON 404, never the SPA shell with a 200.
 async fn api_not_found() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, Json(json!({"error": "not found"})))
+}
+
+/// The native iPad app's player page, built with the web app (`static/native/player.html`). It makes no `/api` call and takes no token, so it is served ahead of the SPA fallback
+/// with its own CSP: scripts from here and YouTube's API, frames only from YouTube's no-cookie host.
+async fn native_player(State(web_dir): State<PathBuf>) -> Response {
+    match tokio::fs::read(web_dir.join("native/player.html")).await {
+        Ok(body) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (axum::http::header::CACHE_CONTROL, "no-store"),
+                (
+                    axum::http::header::CONTENT_SECURITY_POLICY,
+                    "default-src 'self'; script-src 'self' https://www.youtube.com https://s.ytimg.com; \
+                     style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com; \
+                     frame-src https://www.youtube-nocookie.com; connect-src 'self'; \
+                     object-src 'none'; base-uri 'none'",
+                ),
+            ],
+            body,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn healthz() -> impl IntoResponse {

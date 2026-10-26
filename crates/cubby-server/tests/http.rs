@@ -285,3 +285,26 @@ async fn a_thumb_the_worker_wrote_is_served_as_an_image_and_a_missing_one_is_404
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(!body.contains("cubby shell"));
 }
+
+#[tokio::test]
+async fn the_native_player_page_is_html_no_store_with_a_youtube_frame_csp() {
+    let dir = web_dir();
+    std::fs::create_dir_all(dir.join("native")).unwrap();
+    std::fs::write(dir.join("native/player.html"), "<html>native player</html>").unwrap();
+    let res = app(&config(&dir, ""))
+        .unwrap()
+        .oneshot(Request::get("/native/player").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let h = res.headers();
+    assert_eq!(h["cache-control"], "no-store");
+    assert!(h["content-type"].to_str().unwrap().starts_with("text/html"));
+    let csp = h["content-security-policy"].to_str().unwrap();
+    assert!(
+        csp.contains("frame-src https://www.youtube-nocookie.com"),
+        "{csp}"
+    );
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&body).contains("native player"));
+}
