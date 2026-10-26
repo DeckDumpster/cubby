@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{MatchedPath, Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -416,21 +416,57 @@ pub fn app_with_log(config: &Config, log: LogSink) -> Result<Router, String> {
     Ok(app(config)?.layer(axum::Extension(log)))
 }
 
+/// The client behind a request, for metric labels: `"ios"` when `X-Cubby-Client` begins
+/// `ios/`, else `"web"`. Never the raw header, which bounds label cardinality.
+pub(crate) fn client_kind(headers: &HeaderMap) -> &'static str {
+    match headers.get("x-cubby-client").and_then(|v| v.to_str().ok()) {
+        Some(v) if v.starts_with("ios/") => "ios",
+        _ => "web",
+    }
+}
+
 async fn observe(State(sink): State<Arc<MetricsSink>>, req: Request, next: Next) -> Response {
     let route = req
         .extensions()
         .get::<MatchedPath>()
         .map_or_else(|| "spa".to_string(), |m| m.as_str().to_string());
+    let client = client_kind(req.headers());
     let start = Instant::now();
     let res = next.run(req).await;
     if sink.enabled() {
         let seconds = start.elapsed().as_secs_f64();
         let status = res.status().as_u16().to_string();
         tokio::task::spawn_blocking(move || {
-            let labels = [("route", route.as_str()), ("status", status.as_str())];
+            let labels = [
+                ("route", route.as_str()),
+                ("status", status.as_str()),
+                ("client", client),
+            ];
             sink.push_seconds("cubby_http_request_seconds", seconds, &labels);
             sink.push_count("cubby_http_requests", &labels);
         });
     }
     res
+}
+
+#[cfg(test)]
+mod client_kind_tests {
+    use super::*;
+
+    fn kind(v: Option<&str>) -> &'static str {
+        let mut h = HeaderMap::new();
+        if let Some(v) = v {
+            h.insert("x-cubby-client", v.parse().unwrap());
+        }
+        client_kind(&h)
+    }
+
+    #[test]
+    fn only_an_ios_header_is_ios() {
+        assert_eq!(kind(Some("ios/1.0+1")), "ios");
+        assert_eq!(kind(None), "web");
+        assert_eq!(kind(Some("android/9")), "web");
+        assert_eq!(kind(Some("ios")), "web");
+        assert_eq!(kind(Some("whatever")), "web");
+    }
 }

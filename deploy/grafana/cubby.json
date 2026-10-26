@@ -38,8 +38,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome, reason) (count_over_time(cubby_plays[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "expr": "sum by (outcome, reason, client) (count_over_time(cubby_plays[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -69,8 +69,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (child) (count_over_time(cubby_plays[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "expr": "sum by (child, client) (count_over_time(cubby_plays[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -101,7 +101,7 @@
       "targets": [
         {
           "expr": "sum by (child) (sum_over_time(cubby_watch_seconds[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -132,7 +132,7 @@
       "targets": [
         {
           "expr": "sum by (child) (sum_over_time(cubby_charge[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -163,7 +163,7 @@
       "targets": [
         {
           "expr": "sum by (kind, resolution) (count_over_time(cubby_requests[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -194,7 +194,7 @@
       "targets": [
         {
           "expr": "sum(sum_over_time(cubby_yt_quota_units[1d]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -216,7 +216,7 @@
       "targets": [
         {
           "expr": "sum by (call) (sum_over_time(cubby_yt_quota_units[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -247,7 +247,7 @@
       "targets": [
         {
           "expr": "max by (outcome) (max_over_time(cubby_worker_run_seconds[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -269,7 +269,7 @@
       "targets": [
         {
           "expr": "sum by (outcome) (count_over_time(cubby_device_auth[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -300,7 +300,7 @@
       "targets": [
         {
           "expr": "quantile_over_time(0.95, cubby_http_request_seconds[$__interval])",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
@@ -321,8 +321,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (status) (count_over_time(cubby_http_request_seconds[$__interval]))",
-          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}}",
+          "expr": "sum by (status, client) (count_over_time(cubby_http_request_seconds[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}} {{child}} {{kind}} {{resolution}} {{call}} {{route}} {{status}} {{client}}",
           "refId": "A"
         }
       ],
