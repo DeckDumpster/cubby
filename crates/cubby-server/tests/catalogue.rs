@@ -186,7 +186,12 @@ async fn a_child_saves_lists_and_removes_watch_later_over_http() {
     assert_eq!(v["tiles"][0]["youtube_id"], "v1");
     assert_eq!(v["tiles"].as_array().unwrap().len(), 1);
     let (_, h) = send(&router, "GET", "/api/child/home", &t1).await;
-    let later = h["sections"].as_array().unwrap().iter().find(|s| s["key"] == "watch_later").unwrap();
+    let later = h["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["key"] == "watch_later")
+        .unwrap();
     assert_eq!(later["tiles"][0]["youtube_id"], "v1");
     assert_eq!(h["saved"][0], "v1");
 

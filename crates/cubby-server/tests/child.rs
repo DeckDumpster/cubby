@@ -154,13 +154,19 @@ async fn home_shows_each_video_in_exactly_one_row() {
     let (_, body) = get(dedupe_app(1), "/api/child/home", true).await;
     let rows = rows_of(&body);
     let keys: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
-    assert_eq!(keys, ["continue", "watch_later", "liked_channels", "new", "all"]);
+    assert_eq!(
+        keys,
+        ["continue", "watch_later", "liked_channels", "new", "all"]
+    );
     let row = |k: &str| rows.iter().find(|r| r.0 == k).unwrap().1.clone();
     assert_eq!(row("continue"), ["s"]);
     assert_eq!(row("watch_later"), ["o"]);
     assert_eq!(row("new"), ["n"]);
     let mut all = row("all");
-    assert!(all.contains(&"f".to_string()), "a finished video is in Everything");
+    assert!(
+        all.contains(&"f".to_string()),
+        "a finished video is in Everything"
+    );
     all.sort();
     assert_eq!(all, ["f"]);
     let mut every: Vec<String> = rows.iter().flat_map(|r| r.1.clone()).collect();
