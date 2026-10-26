@@ -50,7 +50,7 @@ const FAKE_PLAYER = () => {
 	window.__state = (s) => window.__players.at(-1).opts.events.onStateChange({ data: s });
 };
 
-async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200, fakePlayer = true, next = NEXT } = {}) {
+async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, minutes: null } }, recent = [], requestStatus = 200, fakePlayer = true, next = NEXT, home = HOME } = {}) {
 	const calls = [];
 	await page.addInitScript(() => localStorage.setItem('cubby_token', 'tok'));
 	if (fakePlayer) await page.addInitScript(FAKE_PLAYER);
@@ -60,7 +60,7 @@ async function setup(page, { play = { grant_id: 'g1', remaining: { videos: 2, mi
 		calls.push({ path, body: req.postDataJSON?.() ?? null });
 		const json = (data) => route.fulfill({ json: data });
 		if (path.includes('/playlists/')) return json({ ok: true });
-		if (path.endsWith('/home')) return json(HOME);
+		if (path.endsWith('/home')) return json(home);
 		if (path.endsWith('/recent')) {
 			const q = new URL(req.url()).searchParams;
 			const limit = Number(q.get('limit') ?? 24);
@@ -115,6 +115,25 @@ test('the player is built only after a grant, with the privacy host and the LLD 
 	expect(opts.host).toBe('https://www.youtube-nocookie.com');
 	expect(opts.videoId).toBe('v1');
 	expect(opts.vars).toMatchObject({ autoplay: 1, rel: 0, playsinline: 1, fs: 0, iv_load_policy: 3, controls: 0, disablekb: 1 });
+});
+
+test('opening a Keep watching tile starts the player at its resume_s; other tiles start at 0', async ({ page }) => {
+	const home = {
+		...HOME,
+		sections: [
+			{ key: 'continue', title: 'Keep watching', tiles: [{ ...tile('v7', 'Half seen'), resume_s: 120 }] },
+			{ key: 'all', title: 'All videos', tiles: [tile('v1', 'First video')] }
+		]
+	};
+	await setup(page, { home });
+	await page.goto('/');
+	await page.getByRole('link', { name: /Half seen/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	expect(await page.evaluate(() => window.__players[0].opts.playerVars.start)).toBe(120);
+	await page.goto('/');
+	await page.getByRole('link', { name: /First video/ }).click();
+	await expect(page.locator('iframe[title="fake player"]')).toBeAttached();
+	expect(await page.evaluate(() => window.__players.at(-1).opts.playerVars.start)).toBeUndefined();
 });
 
 test('ENDED destroys the player and shows the end card with suggestions and the remaining budget', async ({ page }) => {

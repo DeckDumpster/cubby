@@ -30,7 +30,7 @@
 		watchLaterPath
 	} from '$lib/child.js';
 
-	type Tile = { youtube_id: string; title: string; channel_id?: string; channel_title?: string; channel_avatar?: string; thumb?: string };
+	type Tile = { youtube_id: string; title: string; channel_id?: string; channel_title?: string; channel_avatar?: string; thumb?: string; resume_s?: number };
 	type Channel = { channel_id: string; title: string; thumb?: string };
 	type ChannelPage = { channel: Channel; tiles: Tile[]; can_request: boolean; requested: boolean };
 	type Remaining = { videos: number | null; minutes: number | null; window_left_s?: number | null; ve_minutes?: number | null };
@@ -569,7 +569,7 @@
 			player = new YT.Player(mount, {
 				host: PLAYER_HOST,
 				videoId: tile.youtube_id,
-				playerVars: { ...PLAYER_VARS, origin },
+				playerVars: { ...PLAYER_VARS, origin, ...(tile.resume_s ? { start: tile.resume_s } : {}) },
 				events: {
 					onReady: () => {
 						player?.playVideo?.();

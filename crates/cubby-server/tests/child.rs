@@ -275,3 +275,38 @@ async fn asking_for_more_files_one_open_request_then_reads_as_waiting() {
     let (st, _) = post(api(false), "/api/child/channel/nowhere/request").await;
     assert_eq!(st, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn continue_tiles_carry_resume_s_from_the_latest_grant() {
+    let c = open();
+    for id in ["far", "near", "end"] {
+        add_video(&c, id, id, "Trains", "[]", 10);
+        allow(&c, id, "kid", "approved");
+    }
+    for (g, id, pos) in [
+        ("g1", "far", 120.0),
+        ("g2", "near", 3.0),
+        ("g3", "end", 290.0),
+    ] {
+        c.execute(
+            "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,max_position_s,watched_s,charge)
+             VALUES(?1,'kid','d',?2,?3,?3,?4,60,1)",
+            rusqlite::params![g, id, NOW - 50, pos],
+        )
+        .unwrap();
+    }
+    let mut api = ChildApi::new(
+        c,
+        Arc::new(|_| Some("kid".to_string())),
+        Arc::new(|_, _| json!({})),
+    );
+    api.now = Arc::new(|| NOW);
+    let (_, body) = get(router(api), "/api/child/home", true).await;
+    let cont = &body["sections"][0];
+    assert_eq!(cont["key"], "continue");
+    let tiles = cont["tiles"].as_array().unwrap();
+    let by = |id: &str| tiles.iter().find(|t| t["youtube_id"] == id).unwrap();
+    assert_eq!(by("far")["resume_s"], 120);
+    assert!(by("near").get("resume_s").is_none());
+    assert!(tiles.iter().all(|t| t["youtube_id"] != "end"));
+}

@@ -218,8 +218,19 @@ fn home_with(
         })
         .collect();
     let tiles = |v: &[&VideoRow]| v.iter().take(HOME_ROW).map(|v| tile(v)).collect::<Vec<_>>();
+    let resume_tiles: Vec<Value> = cont
+        .iter()
+        .take(HOME_ROW)
+        .map(|v| {
+            let mut t = tile(v);
+            if let Some(s) = h.resume_s.get(&v.youtube_id) {
+                t["resume_s"] = json!(s);
+            }
+            t
+        })
+        .collect();
     let mut sections = vec![
-        json!({"key": "continue", "title": "Keep watching", "tiles": tiles(&cont)}),
+        json!({"key": "continue", "title": "Keep watching", "tiles": resume_tiles}),
         json!({"key": "watch_later", "title": "Watch later", "tiles": later_fresh.iter().map(|v| tile(v)).collect::<Vec<_>>()}),
         json!({"key": "liked_channels", "title": "From channels you like", "tiles": liked_row.iter().map(|v| tile(v)).collect::<Vec<_>>()}),
     ];
