@@ -68,9 +68,8 @@
 	let nudgeStage = 0;
 	let prevVideos: number | null = null;
 	let refusalReason = $state('');
-	// Ids on the child's Watch later list, and the row of tiles shown on the landing page.
+	// Ids on the child's Watch later list.
 	let saved = $state<Record<string, boolean>>({});
-	let later = $state<Tile[]>([]);
 	let paused = $state(false);
 	let playing = $state(false);
 	// False from every start, resume and seek until PLAYING has lasted SETTLE_MS: the iframe stays visibility:hidden meanwhile.
@@ -155,7 +154,6 @@
 		remaining = data.remaining ?? remaining;
 		total = data.total_videos ?? total;
 		sections = parseHome(data).sections;
-		later = data.watch_later ?? [];
 		saved = Object.fromEntries((data.saved ?? []).map((id: string) => [id, true]));
 		channels = data.channels ?? [];
 		loadRecentRow();
@@ -770,25 +768,18 @@
 				{#if sections.every((s) => s.tiles.length === 0) && recentRow.length === 0}
 					<p class="empty" data-testid="nothing-allowed">Nothing is allowed yet. Ask a grown-up to add some videos.</p>
 				{/if}
-				{#if later.length}
-					<section data-testid="watch-later-row">
-						<h2>Watch later</h2>
-						<div class="grid">{#each later as t (t.youtube_id)}{@render tile(t)}{/each}</div>
-					</section>
-				{/if}
-				{#if recentRow.length}
-					<section data-testid="recent-row">
-						<div class="searched">
-							<h2>Recently watched</h2>
-							<button class="seeall" onclick={seeAll}>See all</button>
-						</div>
-						<div class="rail">{#each recentRow as t (t.youtube_id)}{@render tile(t)}{/each}</div>
-					</section>
-				{/if}
 				{#each sections as s (s.key)}
-					{#if s.tiles.length}
-						<section>
-							<h2>{s.title}</h2>
+					{@const history = s.key === 'continue' && recentRow.length > 0}
+					{#if s.tiles.length || history}
+						<section data-testid={s.key === 'watch_later' ? 'watch-later-row' : undefined}>
+							{#if history}
+								<div class="searched">
+									<h2>{s.title}</h2>
+									<button class="seeall" data-testid="recent-link" onclick={seeAll}>Recently watched</button>
+								</div>
+							{:else}
+								<h2>{s.title}</h2>
+							{/if}
 							<div class="grid">
 								{#each expanded[s.key] ? s.tiles : s.tiles.slice(0, SHOWN) as t (t.youtube_id)}{@render tile(t)}{/each}
 							</div>

@@ -98,14 +98,89 @@ async fn home_sections_hold_only_playable_videos() {
         .iter()
         .map(|s| s["key"].as_str().unwrap())
         .collect();
-    assert_eq!(keys, ["continue", "liked_channels", "new", "all"]);
+    assert_eq!(keys, ["continue", "watch_later", "liked_channels", "all"]);
     for s in sections {
         for id in ids(&s["tiles"]) {
             assert!(id == "a" || id == "b", "{id} leaked into {}", s["key"]);
         }
     }
     assert_eq!(ids(&sections[3]["tiles"]), ["a", "b"]);
-    assert_eq!(ids(&sections[2]["tiles"]), ["a", "b"]);
+}
+
+const NOW: i64 = 10_000_000;
+
+/// s: saved, started, recently watched. n: newest allowed. f: finished. o: untouched.
+fn dedupe_app(n_added_days_ago: i64) -> axum::Router {
+    let c = open();
+    for (id, age) in [("s", 40), ("n", 0), ("f", 30), ("o", 20)] {
+        add_video(&c, id, id, "Trains", "[]", age);
+        allow(&c, id, "kid", "approved");
+    }
+    c.execute(
+        "UPDATE allowed_videos SET changed_at = ?1 WHERE youtube_id = 'n'",
+        [NOW - n_added_days_ago * 86_400],
+    )
+    .unwrap();
+    for (g, id, pos) in [("g1", "s", 100.0), ("g2", "f", 290.0)] {
+        c.execute(
+            "INSERT INTO play_grants(id,child_id,device_id,youtube_id,granted_at,last_beat_at,max_position_s,watched_s,charge)
+             VALUES(?1,'kid','d',?2,?3,?3,?4,60,1)",
+            rusqlite::params![g, id, NOW - 50, pos],
+        )
+        .unwrap();
+    }
+    cubby_db::playlists::add(&c, "kid", "watch_later", "s", NOW - 100).unwrap();
+    cubby_db::playlists::add(&c, "kid", "watch_later", "o", NOW - 90).unwrap();
+    let mut api = ChildApi::new(
+        c,
+        Arc::new(|_| Some("kid".to_string())),
+        Arc::new(|_, _| json!({})),
+    );
+    api.now = Arc::new(|| NOW);
+    router(api)
+}
+
+fn rows_of(body: &Value) -> Vec<(String, Vec<String>)> {
+    body["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["key"].as_str().unwrap().to_string(), ids(&s["tiles"])))
+        .collect()
+}
+
+#[tokio::test]
+async fn home_shows_each_video_in_exactly_one_row() {
+    let (_, body) = get(dedupe_app(1), "/api/child/home", true).await;
+    let rows = rows_of(&body);
+    let keys: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    assert_eq!(
+        keys,
+        ["continue", "watch_later", "liked_channels", "new", "all"]
+    );
+    let row = |k: &str| rows.iter().find(|r| r.0 == k).unwrap().1.clone();
+    assert_eq!(row("continue"), ["s"]);
+    assert_eq!(row("watch_later"), ["o"]);
+    assert_eq!(row("new"), ["n"]);
+    let mut all = row("all");
+    assert!(
+        all.contains(&"f".to_string()),
+        "a finished video is in Everything"
+    );
+    all.sort();
+    assert_eq!(all, ["f"]);
+    let mut every: Vec<String> = rows.iter().flat_map(|r| r.1.clone()).collect();
+    every.sort();
+    assert_eq!(every, ["f", "n", "o", "s"]);
+}
+
+#[tokio::test]
+async fn home_has_no_new_row_when_nothing_was_added_in_seven_days() {
+    let (_, body) = get(dedupe_app(8), "/api/child/home", true).await;
+    let rows = rows_of(&body);
+    assert!(rows.iter().all(|r| r.0 != "new"));
+    let all = &rows.iter().find(|r| r.0 == "all").unwrap().1;
+    assert!(all.contains(&"n".to_string()) && all.contains(&"f".to_string()));
 }
 
 #[tokio::test]
@@ -138,14 +213,14 @@ fn fixture(name: &str) -> Value {
 #[tokio::test]
 async fn home_and_search_json_match_the_fixtures_the_page_parses() {
     let (_, home) = get(api(false), "/api/child/home", true).await;
-    let new = home["sections"]
+    let all = home["sections"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|s| s["key"] == "new")
+        .find(|s| s["key"] == "all")
         .unwrap();
     assert_eq!(
-        shape(new),
+        shape(all),
         shape(&fixture("child-home.json")["sections"][0])
     );
     let (_, search) = get(api(false), "/api/child/search?q=blue", true).await;
