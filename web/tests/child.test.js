@@ -80,7 +80,7 @@ const fixture = (/** @type {string} */ n) => JSON.parse(readFileSync(new URL(`./
 
 test('the page reads the server home payload: sections carry titled tiles', () => {
 	const { sections } = parseHome(fixture('child-home.json'));
-	assert.equal(sections[0].title, 'New');
+	assert.equal(sections[0].title, 'Everything');
 	assert.equal(sections[0].tiles[0].youtube_id, 'a');
 });
 

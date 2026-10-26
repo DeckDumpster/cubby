@@ -3,7 +3,7 @@
 //! Every query here reads the `playable(child_id, youtube_id)` view and nothing else decides
 //! what a child may see.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, params};
 
@@ -248,6 +248,19 @@ pub fn history(conn: &Connection, child_id: &str) -> rusqlite::Result<History> {
         h.liked_channels.insert(c?);
     }
     Ok(h)
+}
+
+/// When each playable video was first allowed for the child: the earliest `changed_at` of a
+/// live allow row, the only added-time the schema carries.
+pub fn added_at(conn: &Connection, child_id: &str) -> rusqlite::Result<HashMap<String, i64>> {
+    conn.prepare(
+        "SELECT a.youtube_id, MIN(a.changed_at) FROM allowed_videos a \
+         JOIN allow_policies p ON p.id = a.policy_id \
+         WHERE (a.child_id IS NULL OR a.child_id = ?1) AND p.removed_at IS NULL \
+           AND a.state IN ('auto-allowed','approved') GROUP BY a.youtube_id",
+    )?
+    .query_map(params![child_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+    .collect()
 }
 
 /// A play shorter than this never really started (a refusal, an instant bounce).

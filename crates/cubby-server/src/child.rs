@@ -1,7 +1,7 @@
 //! Child API reads: home, search and next. Every tile comes from `playable`, and ranker output
 //! is passed through `rank_checked` so it cannot name a video outside that set.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, Query, State};
@@ -24,6 +24,8 @@ use crate::identity::{ParentOf, open_own};
 pub const NEXT_TILES: usize = 12;
 const HOME_ROW: usize = 12;
 const HOME_ALL: usize = 60;
+/// How long a newly allowed video counts as New.
+const NEW_WINDOW_S: i64 = 7 * 24 * 3600;
 const SEARCH_LIMIT: usize = 40;
 const RECENT_PAGE: usize = 24;
 const RECENT_MAX: usize = 60;
@@ -145,27 +147,58 @@ fn home_with(
     let c = ctx(&h, now);
     let by_id: HashMap<&str, &VideoRow> = rows.iter().map(|r| (r.youtube_id.as_str(), r)).collect();
 
-    let cont: Vec<Value> = h
+    // One seen-set, rows built in display order: a video lives in the first row it qualifies for.
+    let mut seen: HashSet<&str> = HashSet::new();
+    let cont: Vec<&VideoRow> = h
         .resumable
         .iter()
-        .filter_map(|id| by_id.get(id.as_str()))
-        .take(HOME_ROW)
-        .map(|v| tile(v))
+        .filter_map(|id| by_id.get(id.as_str()).copied())
+        .filter(|v| seen.insert(v.youtube_id.as_str()))
+        .collect();
+    // Saved and not yet started; once started a video is in Keep watching only.
+    let later_rows = playlists::list(conn, child_id, playlists::WATCH_LATER).unwrap_or_default();
+    let later_fresh: Vec<&VideoRow> = later_rows
+        .iter()
+        .filter(|v| !h.watched.contains(&v.youtube_id) && seen.insert(v.youtube_id.as_str()))
         .collect();
     let liked: Vec<VideoRow> = rows
         .iter()
         .filter(|r| h.liked_channels.contains(&r.channel_id))
+        .filter(|r| !seen.contains(r.youtube_id.as_str()))
         .cloned()
         .collect();
+    let liked_row = ranked(ranker, &c, None, &liked, HOME_ROW);
+    for v in &liked_row {
+        seen.insert(v.youtube_id.as_str());
+    }
+    // New: allowed within the last 7 days (allowed_videos.changed_at, earliest live allow) and
+    // never watched.
+    let added = browse::added_at(conn, child_id)?;
     let mut newest: Vec<&VideoRow> = rows
         .iter()
         .filter(|r| !h.watched.contains(&r.youtube_id))
+        .filter(|r| {
+            added
+                .get(&r.youtube_id)
+                .is_some_and(|t| *t > now - NEW_WINDOW_S)
+        })
+        .filter(|r| !seen.contains(r.youtube_id.as_str()))
         .collect();
     newest.sort_by(|a, b| {
-        b.published_at
-            .cmp(&a.published_at)
+        added[&b.youtube_id]
+            .cmp(&added[&a.youtube_id])
             .then_with(|| a.youtube_id.cmp(&b.youtube_id))
     });
+    newest.truncate(HOME_ROW);
+    for v in &newest {
+        seen.insert(v.youtube_id.as_str());
+    }
+    let rest: Vec<VideoRow> = rows
+        .iter()
+        .filter(|r| !seen.contains(r.youtube_id.as_str()))
+        .cloned()
+        .collect();
+    let all_row = ranked(ranker, &c, None, &rest, HOME_ALL);
     let child = conn
         .query_row(
             "SELECT name, avatar FROM children WHERE id=?1",
@@ -173,7 +206,6 @@ fn home_with(
             |r| Ok(json!({"name": r.get::<_, String>(0)?, "avatar": r.get::<_, String>(1)?})),
         )
         .unwrap_or(Value::Null);
-    let later = playlists::list(conn, child_id, playlists::WATCH_LATER).unwrap_or_default();
     let saved = playlists::saved_ids(conn, child_id, playlists::WATCH_LATER)?;
     let channels: Vec<Value> = browse::channels(conn, child_id)?
         .iter()
@@ -185,18 +217,22 @@ fn home_with(
             })
         })
         .collect();
+    let tiles = |v: &[&VideoRow]| v.iter().take(HOME_ROW).map(|v| tile(v)).collect::<Vec<_>>();
+    let mut sections = vec![
+        json!({"key": "continue", "title": "Keep watching", "tiles": tiles(&cont)}),
+        json!({"key": "watch_later", "title": "Watch later", "tiles": later_fresh.iter().map(|v| tile(v)).collect::<Vec<_>>()}),
+        json!({"key": "liked_channels", "title": "From channels you like", "tiles": liked_row.iter().map(|v| tile(v)).collect::<Vec<_>>()}),
+    ];
+    if !newest.is_empty() {
+        sections.push(json!({"key": "new", "title": "New", "tiles": tiles(&newest)}));
+    }
+    sections.push(json!({"key": "all", "title": "Everything", "tiles": all_row.iter().map(|v| tile(v)).collect::<Vec<_>>()}));
     Ok(json!({
         "child": child,
         "remaining": remaining,
         "saved": saved.iter().collect::<Vec<_>>(),
-        "watch_later": later.iter().map(tile).collect::<Vec<_>>(),
         "channels": channels,
-        "sections": [
-            {"key": "continue", "title": "Keep watching", "tiles": cont},
-            {"key": "liked_channels", "title": "From channels you like", "tiles": ranked(ranker, &c, None, &liked, HOME_ROW).iter().map(|v| tile(v)).collect::<Vec<_>>()},
-            {"key": "new", "title": "New", "tiles": newest.iter().take(HOME_ROW).map(|v| tile(v)).collect::<Vec<_>>()},
-            {"key": "all", "title": "Everything", "tiles": ranked(ranker, &c, None, &rows, HOME_ALL).iter().map(|v| tile(v)).collect::<Vec<_>>()},
-        ],
+        "sections": sections,
     }))
 }
 

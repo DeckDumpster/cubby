@@ -5,7 +5,7 @@ const HOME = {
 	child: { name: 'Kid', avatar: '🦄' },
 	remaining: { videos: 3, minutes: null },
 	total_videos: 5,
-	sections: [{ key: 'all', title: 'All videos', tiles: [tile('v1', 'First video'), tile('v2', 'Second video')] }]
+	sections: [{ key: 'continue', title: 'Keep watching', tiles: [] }, { key: 'all', title: 'All videos', tiles: [tile('v1', 'First video'), tile('v2', 'Second video')] }]
 };
 const NEXT = { tiles: [tile('v2', 'Second video'), tile('v3', 'Third video')], remaining: { videos: 2, minutes: null } };
 
@@ -456,21 +456,12 @@ for (const [name, width, height] of SIZES) {
 const HISTORY = Array.from({ length: 30 }, (_, i) => tile(`h${i}`, `Watched ${i}`));
 
 for (const [name, size] of [['ipad', { width: 820, height: 1180 }], ['phone', { width: 390, height: 844 }]]) {
-	test(`recently watched: one row with See all, then the full list (${name})`, async ({ page }) => {
+	test(`recently watched: a link beside Keep watching opens the full list (${name})`, async ({ page }) => {
 		await page.setViewportSize(size);
 		await setup(page, { recent: HISTORY });
 		await page.goto('/');
-		const row = page.getByTestId('recent-row');
-		await expect(row).toBeVisible();
-		const tops = await row.locator('.tile').evaluateAll((els) => {
-			const rail = els[0].parentElement.getBoundingClientRect();
-			return els.filter((e) => e.getBoundingClientRect().top < rail.bottom - 1).map((e) => Math.round(e.getBoundingClientRect().top));
-		});
-		expect(tops.length).toBeGreaterThan(0);
-		expect(new Set(tops).size).toBe(1);
-		await page.screenshot({ path: `../docs/screenshots/recent/row-${name}.png` });
-
-		await row.getByRole('button', { name: 'See all' }).click();
+		await expect(page.getByTestId('recent-row')).toHaveCount(0);
+		await page.getByTestId('recent-link').click();
 		await expect(page).toHaveURL(/\/recent$/);
 		await expect(page.getByTestId('recent-all').locator('.tile')).toHaveCount(24);
 		await page.getByRole('button', { name: 'More' }).click();
@@ -478,7 +469,7 @@ for (const [name, size] of [['ipad', { width: 820, height: 1180 }], ['phone', { 
 		await page.screenshot({ path: `../docs/screenshots/recent/all-${name}.png` });
 
 		await page.getByRole('button', { name: /Home/ }).click();
-		await expect(page.getByTestId('recent-row')).toBeVisible();
+		await expect(page.getByTestId('recent-link')).toBeVisible();
 	});
 }
 
@@ -570,7 +561,7 @@ for (const [name, size] of [['phone', { width: 390, height: 844 }], ['ipad', { w
 test('every tile has a Watch later control that saves and unsaves, and the row shows the saved videos', async ({ page }) => {
 	const calls = await setup(page);
 	await page.route('**/api/child/home', (route) =>
-		route.fulfill({ json: { ...HOME, saved: ['v2'], watch_later: [tile('v2', 'Second video')] } })
+		route.fulfill({ json: { ...HOME, saved: ['v2'], sections: [{ key: 'watch_later', title: 'Watch later', tiles: [tile('v2', 'Second video')] }, ...HOME.sections] } })
 	);
 	await page.goto('/');
 	const row = page.getByTestId('watch-later-row');
