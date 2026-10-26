@@ -9,8 +9,11 @@ export default defineConfig({
 			name: 'native-player-route',
 			enforce: 'pre',
 			configureServer(server) {
-				server.middlewares.use((req, _res, next) => {
-					if (req.url === '/native/player') req.url = '/native/player.html';
+				server.middlewares.use((req, res, next) => {
+					if (req.url === '/native/player') {
+						req.url = '/native/player.html';
+						res.setHeader('cache-control', 'no-store');
+					}
 					next();
 				});
 			}
