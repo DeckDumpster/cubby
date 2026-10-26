@@ -7,6 +7,7 @@ export default defineConfig({
 		{
 			// The server serves /native/player from static/native/player.html; do the same in dev.
 			name: 'native-player-route',
+			enforce: 'pre',
 			configureServer(server) {
 				server.middlewares.use((req, _res, next) => {
 					if (req.url === '/native/player') req.url = '/native/player.html';
