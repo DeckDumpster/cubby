@@ -1,0 +1,402 @@
+{
+ "description": "Shared child-facing budget-text vectors. The web child UI (web/src/lib/child.js) and the iPad app's BudgetText must both pass every row. Copy this file verbatim. Each row: fn names the function, in holds its named arguments, out its result (null = no result/no badge). badge: in.videos/minutes/ve_minutes are the remaining budget (null = unlimited); out is the badge text or null. moreAfterThis: out is a number (whole count, 0.5 = a little more time, 0 = last, -1 = runs out mid-video) or null. startNotice: in.n is a moreAfterThis result; out is the text ('' = none). timeNotice: out is {text, stage} or null. graceText: in.seconds. length: in.seconds -> m:ss, h:mm:ss from an hour, 0 -> an em dash. refusal: in.next_start is unix seconds; time is formatted in in.time_zone with in.locale; 1793460600 is 2026-10-31T15:30:00Z.",
+ "vectors": [
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 3.4,
+    "minutes": null
+   },
+   "out": "3 videos left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 1.0,
+    "minutes": null
+   },
+   "out": "1 video left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 1.99,
+    "minutes": null
+   },
+   "out": "1 video left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 0.62,
+    "minutes": 9,
+    "ve_minutes": 15
+   },
+   "out": "9 minutes left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 0.62,
+    "minutes": null
+   },
+   "out": "A little more time today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 0,
+    "minutes": 30
+   },
+   "out": "All done for today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": -0.4,
+    "minutes": null
+   },
+   "out": "All done for today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 2,
+    "minutes": 0
+   },
+   "out": "All done for today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 2,
+    "minutes": 0.3,
+    "ve_minutes": 15
+   },
+   "out": "1 minute left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 5,
+    "minutes": 40,
+    "ve_minutes": 15
+   },
+   "out": "40 minutes left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": 2,
+    "minutes": 200,
+    "ve_minutes": 15
+   },
+   "out": "2 videos left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": null,
+    "minutes": 12.6
+   },
+   "out": "13 minutes left today"
+  },
+  {
+   "fn": "badge",
+   "in": {
+    "videos": null,
+    "minutes": null
+   },
+   "out": null
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 3.0,
+    "duration_s": 600,
+    "ve_minutes": 15
+   },
+   "out": 2
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 1.64,
+    "duration_s": 300,
+    "ve_minutes": 15
+   },
+   "out": 1
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 1.0,
+    "duration_s": 900,
+    "ve_minutes": 15
+   },
+   "out": 0
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 0.62,
+    "duration_s": 600,
+    "ve_minutes": 15
+   },
+   "out": -1
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 1.5,
+    "duration_s": 600,
+    "ve_minutes": 15
+   },
+   "out": 0.5
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 3.2,
+    "duration_s": 0
+   },
+   "out": 2
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 1.5,
+    "duration_s": 0
+   },
+   "out": 0.5
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": 0.8,
+    "duration_s": 0
+   },
+   "out": 0
+  },
+  {
+   "fn": "moreAfterThis",
+   "in": {
+    "videos": null,
+    "duration_s": 600,
+    "ve_minutes": 15
+   },
+   "out": null
+  },
+  {
+   "fn": "startNotice",
+   "in": {
+    "n": 2
+   },
+   "out": "You can watch 2 more videos after this one."
+  },
+  {
+   "fn": "startNotice",
+   "in": {
+    "n": 1
+   },
+   "out": "You can watch 1 more video after this one."
+  },
+  {
+   "fn": "startNotice",
+   "in": {
+    "n": 0
+   },
+   "out": "This is the last video."
+  },
+  {
+   "fn": "startNotice",
+   "in": {
+    "n": -1
+   },
+   "out": "This is the last video. Videos stop partway through this one."
+  },
+  {
+   "fn": "startNotice",
+   "in": {
+    "n": 0.5
+   },
+   "out": "You have a little more time after this one."
+  },
+  {
+   "fn": "startNotice",
+   "in": {
+    "n": null
+   },
+   "out": ""
+  },
+  {
+   "fn": "timeNotice",
+   "in": {
+    "minutes": 4.2,
+    "stage": 0
+   },
+   "out": {
+    "text": "After 5 more minutes, videos will stop.",
+    "stage": 1
+   }
+  },
+  {
+   "fn": "timeNotice",
+   "in": {
+    "minutes": 0.8,
+    "stage": 1
+   },
+   "out": {
+    "text": "After 1 more minute, videos will stop.",
+    "stage": 2
+   }
+  },
+  {
+   "fn": "timeNotice",
+   "in": {
+    "minutes": 6,
+    "stage": 2
+   },
+   "out": null
+  },
+  {
+   "fn": "timeNotice",
+   "in": {
+    "minutes": null,
+    "stage": 0
+   },
+   "out": null
+  },
+  {
+   "fn": "timeNotice",
+   "in": {
+    "minutes": 0,
+    "stage": 0
+   },
+   "out": null
+  },
+  {
+   "fn": "graceText",
+   "in": {
+    "seconds": 120
+   },
+   "out": "2 minutes to look around"
+  },
+  {
+   "fn": "graceText",
+   "in": {
+    "seconds": 61
+   },
+   "out": "2 minutes to look around"
+  },
+  {
+   "fn": "graceText",
+   "in": {
+    "seconds": 60
+   },
+   "out": "60 seconds to look around"
+  },
+  {
+   "fn": "graceText",
+   "in": {
+    "seconds": 1
+   },
+   "out": "1 second to look around"
+  },
+  {
+   "fn": "graceText",
+   "in": {
+    "seconds": 0
+   },
+   "out": "0 seconds to look around"
+  },
+  {
+   "fn": "length",
+   "in": {
+    "seconds": 0
+   },
+   "out": "—"
+  },
+  {
+   "fn": "length",
+   "in": {
+    "seconds": 59
+   },
+   "out": "0:59"
+  },
+  {
+   "fn": "length",
+   "in": {
+    "seconds": 754
+   },
+   "out": "12:34"
+  },
+  {
+   "fn": "length",
+   "in": {
+    "seconds": 3725
+   },
+   "out": "1:02:05"
+  },
+  {
+   "fn": "refusal",
+   "in": {
+    "reason": "out-of-videos",
+    "next_start": null,
+    "locale": "en-US",
+    "time_zone": "UTC"
+   },
+   "out": "You have watched all your videos for today. See you next time!"
+  },
+  {
+   "fn": "refusal",
+   "in": {
+    "reason": "out-of-minutes",
+    "next_start": null,
+    "locale": "en-US",
+    "time_zone": "UTC"
+   },
+   "out": "Your watching time is up for today. See you next time!"
+  },
+  {
+   "fn": "refusal",
+   "in": {
+    "reason": "not-now",
+    "next_start": null,
+    "locale": "en-US",
+    "time_zone": "UTC"
+   },
+   "out": "It is not video time right now."
+  },
+  {
+   "fn": "refusal",
+   "in": {
+    "reason": "not-now",
+    "next_start": 1793460600,
+    "locale": "en-US",
+    "time_zone": "UTC"
+   },
+   "out": "It is not video time right now. Come back at 3:30 PM."
+  },
+  {
+   "fn": "refusal",
+   "in": {
+    "reason": "not-allowed",
+    "next_start": null,
+    "locale": "en-US",
+    "time_zone": "UTC"
+   },
+   "out": "This video is not available."
+  },
+  {
+   "fn": "refusal",
+   "in": {
+    "reason": "other",
+    "next_start": null,
+    "locale": "en-US",
+    "time_zone": "UTC"
+   },
+   "out": "This video is not available."
+  }
+ ]
+}

@@ -268,3 +268,5 @@ export function timeNotice(mins, stage, threshold = NUDGE_MIN) {
 	if (mins <= threshold && stage < 1) return { text: `After ${Math.ceil(mins)} more minutes, videos will stop.`, stage: 1 };
 	return null;
 }
+
+export { fmtLength as length } from './parent.js';
