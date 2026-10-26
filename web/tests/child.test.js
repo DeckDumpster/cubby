@@ -97,6 +97,7 @@ test('parseRecent reads tiles and the more flag, and survives a bad payload', ()
 });
 
 import { graceText } from '../src/lib/child.js';
+import { length as lengthText } from '../src/lib/child.js';
 
 test('the grace countdown reads in plain words', () => {
 	assert.equal(graceText(120), '2 minutes to look around');
@@ -137,3 +138,22 @@ test('only a refusal that is not about the video itself offers Save it for later
 	assert.equal(canSaveForLater('not-allowed'), false);
 	assert.equal(watchLaterPath('a b'), '/api/child/playlists/watch_later/items/a%20b');
 });
+
+const vectors = JSON.parse(readFileSync(new URL('./vectors/budget-text.json', import.meta.url), 'utf8')).vectors;
+/** @type {Record<string, (i: any) => any>} */
+const fns = {
+	badge: (i) => badge(i, null)?.text ?? null,
+	moreAfterThis: (i) => moreAfterThis(i.videos, i.duration_s, i.ve_minutes),
+	startNotice: (i) => startNotice(i.n),
+	timeNotice: (i) => timeNotice(i.minutes, i.stage),
+	graceText: (i) => graceText(i.seconds),
+	length: (i) => lengthText(i.seconds),
+	refusal: (i) => refusalMessage(i.reason, i.next_start, i.locale, i.time_zone)
+};
+
+for (const row of vectors) {
+	test(`vector ${row.fn} ${JSON.stringify(row.in)}`, () => {
+		assert.ok(fns[row.fn], `unknown fn ${row.fn}`);
+		assert.deepEqual(fns[row.fn](row.in), row.out);
+	});
+}
