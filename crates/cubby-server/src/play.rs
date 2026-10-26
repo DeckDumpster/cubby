@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::routing::post;
 use axum::{Extension, Json, Router};
 use cubby_core::budget::{self, Budget, Progress, Refusal, Remaining, Usage};
@@ -594,6 +595,7 @@ async fn play_route(
     State(state): State<Arc<AppState>>,
     Extension(ParentOf(family_id)): Extension<ParentOf>,
     Extension(dev): Extension<Device>,
+    headers: HeaderMap,
     Json(body): Json<PlayBody>,
 ) -> Result<Json<Value>, ApiError> {
     let conn = open_own(&state, &family_id)?;
@@ -613,6 +615,7 @@ async fn play_route(
             ("child", dev.child_id.clone()),
             ("outcome", label.into()),
             ("reason", reason.into()),
+            ("client", crate::client_kind(&headers).into()),
         ],
     );
     Ok(Json(match outcome {

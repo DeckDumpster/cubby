@@ -461,6 +461,53 @@ async fn play_beat_and_http_telemetry_reach_the_otlp_sink() {
 }
 
 #[tokio::test]
+async fn requests_and_plays_are_labelled_by_client() {
+    let f = cubby_otel::fake::FakeSink::start();
+    let e = env_with(true, &f.addr).await;
+    seed(&e);
+    let conn = e.family();
+    let code = ident::new_pairing_code(&conn, "c1", now())
+        .unwrap()
+        .unwrap();
+    let token = ident::redeem_pairing_code(&conn, &e.family_id, &code.code, None, now())
+        .unwrap()
+        .token;
+    for (header, want) in [
+        (Some("ios/1.0+1"), "ios"),
+        (None, "web"),
+        (Some("curl/8 <script>"), "web"),
+    ] {
+        let mut r = Request::post("/api/child/play")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {token}"));
+        if let Some(h) = header {
+            r = r.header("x-cubby-client", h);
+        }
+        e.call(
+            r.body(Body::from(json!({"youtube_id": "nope"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+        let seen = |name: &str| {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !f
+                .samples()
+                .iter()
+                .any(|s| s.name == name && s.label("client") == Some(want))
+            {
+                assert!(
+                    std::time::Instant::now() < end,
+                    "no {name} with client={want}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+        seen("cubby_plays");
+        seen("cubby_http_request_seconds");
+    }
+}
+
+#[tokio::test]
 async fn the_family_cli_creates_a_family_an_access_request_is_then_accepted_for() {
     let e = env_build(true, "", false).await;
     let data = e.dir.join("data");
