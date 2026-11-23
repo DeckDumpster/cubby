@@ -6,11 +6,9 @@ set -euo pipefail
 # `--build-only` compiles everything the gate tests and runs no test, so the harness can time
 # only the tests against its cap: `testenv --suites build <branch> cubby`.
 build_only=0
-case "${1-}" in
-    "") ;;
-    --build-only) [ "$#" -eq 1 ] && build_only=1 ;;
-esac
-if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$build_only" -eq 0 ]; }; then
+if [ "$#" -eq 1 ] && [ "$1" = "--build-only" ]; then
+    build_only=1
+elif [ "$#" -ne 0 ]; then
     echo "usage: deploy/ci.sh [--build-only]" >&2
     exit 2
 fi
