@@ -1,0 +1,1 @@
+after_landing = "the deploy.yml run for the landed commit on main succeeds: on the host in deploy/prod-host, ~/cubby-prod HEAD is that commit and deploy/smoke.sh passed"

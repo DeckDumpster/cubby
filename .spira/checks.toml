@@ -1,0 +1,33 @@
+# Rows `work checks` runs before a branch is submitted. Each budget leaves room for a cold build
+# of the dependencies.
+# The `env` prefix on clippy and unit: the dev shell's cc wrapper refuses to link into a cargo target
+# directory outside the Nix build tree unless purity enforcement is off and NIX_BUILD_TOP is set.
+[[check]]
+name = "fmt"
+run = "cargo fmt --all --check"
+budget_ms = 30000
+
+[[check]]
+name = "clippy"
+run = "env NIX_ENFORCE_PURITY=0 NIX_BUILD_TOP=${TMPDIR:-/tmp} cargo clippy --workspace --all-targets -- -D warnings"
+budget_ms = 300000
+
+[[check]]
+name = "unit"
+run = "env NIX_ENFORCE_PURITY=0 NIX_BUILD_TOP=${TMPDIR:-/tmp} cargo test --workspace --all-targets"
+budget_ms = 600000
+
+[[check]]
+name = "web-install"
+run = "npm --prefix web ci"
+budget_ms = 120000
+
+[[check]]
+name = "web-check"
+run = "npm --prefix web run check"
+budget_ms = 120000
+
+[[check]]
+name = "web-unit"
+run = "npm --prefix web test"
+budget_ms = 60000
