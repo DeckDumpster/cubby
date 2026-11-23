@@ -12,6 +12,11 @@ default = ["ci"]
 argv = ["bash", "deploy/ci.sh"]
 timeout = 1800
 
+# Compiles everything the gate tests and runs no test; the harness runs it first, uncharged.
+[tier.build]
+argv = ["bash", "deploy/ci.sh", "--build-only"]
+timeout = 1800
+
 [ui]
 dir = "web"
 
